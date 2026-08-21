@@ -24,6 +24,16 @@ public:
     // 立即移动到指定足端坐标（瞬间到达，用于初始复位）
     void setFootPositionImmediate(float x, float y);
 
+    // 根据几何约束计算【默认站立】足端位置：
+    //   小腿竖直，且与最小圆（内圆，半径 |LENA-LENB|）相切。
+    //   为使 IK 算出的腿真正竖直，取负侧切线 kx = -(LENA-LENB)。
+    static void defaultStandingFoot(double& x, double& y);
+
+    // 根据几何约束计算【伸出】足端位置：
+    //   在默认站立位置的水平线上，取它与大圆（半径 LENA+LENB）同侧交点
+    //   所成线段的 2/3 处。
+    static void extendedFoot(double& x, double& y);
+
     // 启动抓取动作（核心函数）
     void startGrab(float startX, float startY, 
                    float targetX, float targetY, 
@@ -45,7 +55,7 @@ private:
     Servo servoFemur;
     Servo servoTibia;
 
-    LegKinematics kin;  // 你的 IK 类（默认构造用 4.0, 3.0）
+    LegKinematics kin;  // 腿长取自 Config.h（LENA 大腿 / LENB 小腿）
 
     // 状态变量
     float currentX, currentY;

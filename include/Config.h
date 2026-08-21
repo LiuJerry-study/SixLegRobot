@@ -1,9 +1,13 @@
 /*机器人物理参数（腿长、舵机通道、PWM范围、偏移角） */
-/*#pragma once
+#pragma once
 
 namespace robot {
-    constexpr float LENA = 4.0f;   // 大腿长（cm）
-    constexpr float LENB = 3.0f;   // 小腿长（cm）
+    // 腿长以 cm 为单位。
+    // 注意：默认站立时小腿竖直并且与最小圆（内圆）相切，此时脚要落在髋节下方，
+    //       必须满足 大腿≤小腿。因此大腿(LENA)=3.0，小腿(LENB)=4.0，
+    //       （不是原来的 4.0 大腿 / 3.0 小腿）。
+    constexpr double LENA = 3.0;   // 大腿长（cm）
+    constexpr double LENB = 4.0;   // 小腿长（cm）
 
     // 6条腿 × 3个舵机（髋、大腿、小腿）
     constexpr int SERVO_PINS[6][3] = {
@@ -15,4 +19,4 @@ namespace robot {
         {-90, 0, 0}, {90, 0, 0}, {-90, 0, 0},
         {90, 0, 0}, {-90, 0, 0}, {90, 0, 0}
     };
-}*/
+}

@@ -1,6 +1,18 @@
 /*机器人物理参数（腿长、舵机通道、PWM范围、偏移角） */
-// const float LENA = 4.0;   // 大腿长（cm）
-// const float LENB = 3.0;   // 小腿长
-// const int SERVO_PINS[6][3]; // 6条腿×3个舵机对应的GPIO
-// const float ANGLE_OFFSET[6][3]; // 舵机零位偏移（可选）
-// const float PWM_MIN = 500, PWM_MAX = 2500; // 舵机脉宽范围
+/*#pragma once
+
+namespace robot {
+    constexpr float LENA = 4.0f;   // 大腿长（cm）
+    constexpr float LENB = 3.0f;   // 小腿长（cm）
+
+    // 6条腿 × 3个舵机（髋、大腿、小腿）
+    constexpr int SERVO_PINS[6][3] = {
+        {2, 3, 4}, {5, 6, 7}, {8, 9, 10},
+        {11, 12, 13}, {14, 15, 16}, {17, 18, 19}
+    };
+    // 舵机零位偏移（角度），每个舵机一个
+    constexpr float ANGLE_OFFSET[6][3] = {
+        {-90, 0, 0}, {90, 0, 0}, {-90, 0, 0},
+        {90, 0, 0}, {-90, 0, 0}, {90, 0, 0}
+    };
+}*/

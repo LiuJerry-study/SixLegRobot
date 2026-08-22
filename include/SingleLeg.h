@@ -1,5 +1,6 @@
 /* 单腿控制类：足端位置管理 + 轨迹插值（摆动相 / 支撑相）。
  *
+ * 硬件：每条腿 2 个舵机（大腿 + 小腿），两自由度在同一竖直平面内，无髋节旋转。
  * 方案 A：不直接操作舵机——引脚、零位偏移、限幅全部由 ServoManager 负责，
  * 本类只做「足端坐标 → 关节角 → 写入」的运动学逻辑。
  */
@@ -18,7 +19,7 @@ enum TrajectoryMode {
 
 class SingleLeg {
 public:
-    // 只需腿 ID（0~5）；3 个舵机引脚由 Config.h 的 SERVO_PINS[legId] 决定
+    // 只需腿 ID（0~5）；2 个舵机引脚由 Config.h 的 SERVO_PINS[legId] 决定
     SingleLeg(int id);
 
     // setup 中调用；内部自动调 ServoManager::begin()（幂等）
@@ -60,7 +61,7 @@ private:
     bool isMovingFlag;
 
     // 弧度 → 舵机坐标系 → ServoManager 写入（偏移与限幅在其内部）
-    void writeServosFromRad(float baseAngleDeg, float thighRad, float kneeRad);
+    void writeServosFromRad(float thighRad, float kneeRad);
 };
 
 #endif

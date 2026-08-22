@@ -44,7 +44,7 @@ void SingleLeg::init(float standH) {
     currentY = (float)sy;
 
     LegAngles ang = kin.ik(currentX, currentY);
-    writeServosFromRad(90.0, ang.thigh, ang.knee);  // 基节舵机居中 90°
+    writeServosFromRad(ang.thigh, ang.knee);
 
     delay(100);   // 舵机上电稳定时间
 }
@@ -54,7 +54,7 @@ void SingleLeg::setFootPositionImmediate(float x, float y) {
     currentX = x;
     currentY = y;
     LegAngles ang = kin.ik(x, y);
-    writeServosFromRad(90.0, ang.thigh, ang.knee);
+    writeServosFromRad(ang.thigh, ang.knee);
     isMovingFlag = false;
 }
 
@@ -107,9 +107,9 @@ void SingleLeg::update() {
         y = targetY;
     }
 
-    // 5~6. IK 求角并写入（基节保持 90° 居中；将来转向时替换该值）
+    // 5~6. IK 求角并写入两个舵机
     LegAngles ang = kin.ik(x, y);
-    writeServosFromRad(90.0, ang.thigh, ang.knee);
+    writeServosFromRad(ang.thigh, ang.knee);
 
     // 7. 更新当前坐标
     currentX = x;
@@ -124,7 +124,7 @@ void SingleLeg::update() {
 }
 
 // 弧度 → 舵机坐标系 → ServoManager 写入
-void SingleLeg::writeServosFromRad(float baseAngleDeg, float thighRad, float kneeRad) {
+void SingleLeg::writeServosFromRad(float thighRad, float kneeRad) {
     float thighDeg = thighRad * 180.0 / PI;
     float kneeDeg  = kneeRad  * 180.0 / PI;
 
@@ -137,7 +137,6 @@ void SingleLeg::writeServosFromRad(float baseAngleDeg, float thighRad, float kne
     float servoknee = 180.0 - kneeDeg;
 
     // 偏移补偿与限幅由 ServoManager 完成
-    ServoManager::write(legId, ServoManager::BASE,  baseAngleDeg);
     ServoManager::write(legId, ServoManager::FEMUR, servoThigh);
     ServoManager::write(legId, ServoManager::TIBIA, servoknee);
 }

@@ -2,15 +2,15 @@
 
 #include "ServoManager.h"
 
-Servo ServoManager::servos_[6][3];
+Servo ServoManager::servos_[6][2];
 bool  ServoManager::attached_ = false;
 
-// attach 全部 18 个舵机（引脚表 Config.h SERVO_PINS）；幂等
+// attach 全部 12 个舵机（引脚表 Config.h SERVO_PINS）；幂等
 void ServoManager::begin() {
     if (attached_) return;
 
     for (int leg = 0; leg < 6; leg++) {
-        for (int j = 0; j < 3; j++) {
+        for (int j = 0; j < 2; j++) {
             servos_[leg][j].attach(robot::SERVO_PINS[leg][j]);
         }
     }

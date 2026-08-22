@@ -1,7 +1,7 @@
 /* 逆运动学实现
- * 核心公式与角度计算/try.cpp 中的 ccl() 一致：
- *   knee  = acos((lena^2 + lenb^2 - dist^2) / (2*lena*lenb))
- *   thigh = acos((lena^2 + dist^2 - lenb^2) / (2*lena*dist)) + atan2(x, y)
+ * 核心公式（与 角度计算/try.cpp 的 ccl() 一致）：
+ *   knee  = acos((lena² + lenb² - dist²) / (2·lena·lenb))
+ *   thigh = acos((lena² + dist² - lenb²) / (2·lena·dist)) + atan2(x, y)
  */
 #include "LegKinematics.h"
 #include <algorithm>
@@ -32,19 +32,17 @@ LegAngles LegKinematics::ik(double fx, double fy) const {
     a.knee = 0.0;
     a.thigh = 0.0;
 
-    // 原点附近无法构成角度
-    if (d < 1e-9) {
+    if (d < 1e-9)   // 原点附近无法构成角度
         return a;
-    }
 
-    // 将余弦值夹逼到 [-1, 1]，避免浮点越界导致 acos 返回 NaN
+    // 余弦夹逼到 [-1, 1]，避免浮点误差使 acos 返回 NaN
     auto clamp = [](double v) { return std::max(-1.0, std::min(1.0, v)); };
 
-    // ag1 两腿角（膝盖角）
+    // 膝盖角（两腿角 ag1）
     const double cos1 = (lena_ * lena_ + lenb_ * lenb_ - d * d) / (2 * lena_ * lenb_);
     a.knee = std::acos(clamp(cos1));
 
-    // ag2 机腿角（大腿角）
+    // 大腿角（机腿角 ag2）
     const double cos2 = (lena_ * lena_ + d * d - lenb_ * lenb_) / (2 * lena_ * d);
     a.thigh = std::acos(clamp(cos2)) + std::atan2(fx, fy);
 

@@ -4,10 +4,11 @@
 #pragma once
 
 namespace robot {
-    // 腿长（cm）。默认站立时小腿竖直并与最小圆（内圆）相切，脚落在髋节下方，
-    // 故需满足 大腿 ≤ 小腿：LENA = 3.0，LENB = 4.0。
-    constexpr double LENA = 3.0;   // 大腿长
-    constexpr double LENB = 4.0;   // 小腿长
+    // 腿长（cm），实测硬件：大腿 8cm、小腿 13cm。
+    // 默认站立时小腿竖直并与最小圆（内圆，半径 |LENA-LENB| = 5cm）负侧相切，
+    // 脚落在膝正下方（髋外侧 5cm、下方 6.755cm）。
+    constexpr double LENA = 8.0;   // 大腿长
+    constexpr double LENB = 13.0;  // 小腿长
 
     // 6 条腿 × 2 个舵机（大腿、小腿）的引脚
     constexpr int SERVO_PINS[6][2] = {

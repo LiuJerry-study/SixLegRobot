@@ -9,8 +9,8 @@
 import tkinter as tk
 import math
 
-LENA = 4.0   # 大腿长度
-LENB = 3.0   # 小腿长度
+LENA = 8.0   # 大腿长度（实测硬件）
+LENB = 13.0  # 小腿长度（实测硬件）
 W = 900
 H = 640
 SCALE = 60   # 初始缩放（每单位像素数）

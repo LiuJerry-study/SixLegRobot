@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>六足机器人步态模拟器 · 径向2舵机腿 · Rapier物理引擎</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="bootError"></div>
+
+<div id="panel">
+  <h1>六足机器人步态模拟器</h1>
+  <p class="sub">径向 2 舵机腿 · 蜘蛛式折腿（大腿8.0 / 小腿13.0cm）· 无转向关节 · 全向平移 · 摩擦动力学</p>
+
+  <section>
+    <h2>步态模式</h2>
+    <label><input type="radio" name="mode" value="tripod" checked> 三角步态 <span class="dim">快速直线（3腿交替支撑）</span></label>
+    <label><input type="radio" name="mode" value="ripple"> 波纹步态 <span class="dim">一次只动一条腿，最稳</span></label>
+    <label><input type="radio" name="mode" value="bipod"> 对腿步态 <span class="dim">沿对轴平移，唯一“干净”模式</span></label>
+    <div id="pairRow" style="display:none">
+      <span class="dim">对轴（方向φ仅决定沿轴前/后）：</span>
+      <button data-pair="0" class="pairBtn active">0°/180°</button>
+      <button data-pair="1" class="pairBtn">60°/240°</button>
+      <button data-pair="2" class="pairBtn">120°/300°</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>行进</h2>
+    <div class="row"><span>方向 φ</span><input id="phi" type="range" min="0" max="360" step="1" value="0"><span id="phiVal">0°</span></div>
+    <div class="quick">
+      <button class="q" data-phi="0">0°前</button><button class="q" data-phi="30">30°</button>
+      <button class="q" data-phi="90">90°左</button><button class="q" data-phi="180">180°后</button><button class="q" data-phi="270">270°右</button>
+    </div>
+    <div class="row"><span>速度</span><input id="speed" type="range" min="0.05" max="1" step="0.01" value="0.6"></div>
+    <div class="row"><span>步幅</span><input id="stride" type="range" min="0.4" max="1.2" step="0.01" value="0.8"></div>
+    <div class="row"><span>抬腿高度</span><input id="lift" type="range" min="0.5" max="6" step="0.1" value="3.5"></div>
+    <div class="row"><span>机身高度</span><input id="bh" type="range" min="5.5" max="11" step="0.05" value="7.8"></div>
+    <div class="row"><span>摩擦 μ</span><input id="mu" type="range" min="0.05" max="1.5" step="0.05" value="1.0"><span id="muVal" style="width:34px;text-align:right;color:#7fd0ff">1.00</span></div>
+    <div class="dim">摩擦系数越小地面越滑：足底打滑、机身越走越慢（真实库仑摩擦模型）</div>
+  </section>
+
+  <section>
+    <h2>视角</h2>
+    <button id="camDefault">默认</button><button id="camTop">俯视</button>
+    <button id="camSide">侧视</button><button id="camFront">前视</button>
+    <label><input id="follow" type="checkbox"> 跟随机器人</label>
+    <label><input id="autorotate" type="checkbox"> 自动旋转</label>
+  </section>
+
+  <section>
+    <h2>显示</h2>
+    <label><input id="showTrails" type="checkbox" checked> 足端轨迹</label>
+    <label><input id="showBody" type="checkbox" checked> 机身轨迹</label>
+    <label><input id="showForces" type="checkbox" checked> 推力矢量（支撑腿，红=滑移）</label>
+    <label><input id="showAz" type="checkbox" checked> 方位参考环</label>
+  </section>
+
+  <section>
+    <button id="playPause">⏸ 暂停</button>
+    <button id="reset">↺ 重置位置</button>
+  </section>
+
+  <details id="notes" open>
+    <summary>运动学与动力学要点（先读）</summary>
+    <ul>
+      <li><b>蜘蛛式折腿</b>（大腿 8cm + 小腿 13cm）：髋关节在机身边缘（下方）；大腿从髋向外上拱，小腿从膝盖向下折回着地，膝盖是最高/最外点，侧看呈 "Λ" 拱——脚始终着地、膝离地 ≥ 9cm，不会"跪着走"。</li>
+      <li><b>足端范围与固件一致</b>：髋外 5.0cm（默认站立足，小腿竖直、脚在膝正下方）到髋外 14.9cm（伸出足 2/3 分点）；默认站立时足端在髋下方 6.755cm（机身高度 ≈ 7.8cm）。</li>
+      <li><b>支撑相前腿收（拉地）、后腿伸（蹬地）</b>；摆动相相反。行程系数 c<sub>i</sub> = cos(φ−α<sub>i</sub>)，c&gt;0 收 / c&lt;0 伸。</li>
+      <li>每条腿只有径向推力，且作用线都过机心 → <b>机头朝向（偏航）无法改变</b>。“转向”= 全向平移（斜走）。</li>
+      <li><b>摩擦动力学（机身不再匀速）</b>：支撑腿以弹簧-阻尼驱动足端扫掠，推力被库仑静摩擦 μ·N 封顶；超过极限时足底<b>沿径向滑移</b>（红箭头 / HUD 红字），机身在惯性下加速、减速、滑行。拖动“摩擦 μ”即可看到打滑。</li>
+      <li>≥3 腿同时支撑时理想模型运动学锁死，本模型通过<b>足底微滑移</b>自然化解——与真实六足一致（绿色箭头即每腿实际推力）。</li>
+      <li>对腿步态是唯一“干净平移”（无滑移、无偏航耦合），其余 4 腿悬停。</li>
+      <li>角度与固件同构（余弦定理）：膝角 β=acos((L1²+L2²−d²)/(2L1L2))（π=直腿）；髋角 α=atan2(−drop,a)+γ（相对水平径向向外，向上为正）。</li>
+    </ul>
+  </details>
+</div>
+
+<div id="hud">
+  <table>
+    <thead><tr><th>腿</th><th>c<sub>i</sub></th><th>状态</th><th>r(mm)</th><th>髋°</th><th>膝°</th></tr></thead>
+    <tbody id="hudBody"></tbody>
+  </table>
+  <div id="status"></div>
+</div>
+
+<script>
+/* 依次加载库（本地优先，失败回退 CDN），再加载业务脚本 */
+(function () {
+  function load(url) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = url;
+      s.onload = function () { s.remove(); res(); };
+      s.onerror = function () { s.remove(); rej(); };
+      document.head.appendChild(s);
+    });
+  }
+  var cdn = 'https://cdn.jsdelivr.net/npm/three@0.147.0/';
+  var chain = [
+    ['lib/three.min.js', cdn + 'build/three.min.js'],
+    ['lib/OrbitControls.js', cdn + 'examples/js/controls/OrbitControls.js'],
+    ['js/robot.js', null],
+    ['js/gaits.js', null],
+    ['js/physics.js', null],
+    ['js/main.js', null]
+  ];
+  (function next(i) {
+    if (i >= chain.length) return;
+    var pair = chain[i];
+    load(pair[0]).catch(function () {
+      if (pair[1]) return load(pair[1]);
+      throw new Error('脚本加载失败: ' + pair[0]);
+    }).then(function () { next(i + 1); })
+      .catch(function (e) {
+        document.getElementById('bootError').textContent =
+          '启动失败: ' + e.message + '（若离线，请确认 lib/ 目录存在 three.min.js 与 OrbitControls.js）';
+      });
+  })(0);
+})();
+</script>
+</body>
+</html>

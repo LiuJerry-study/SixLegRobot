@@ -17,6 +17,15 @@ enum TrajectoryMode {
     MODE_STANCE    // 支撑相：贴地锁高（防打滑）
 };
 
+// 单腿原语：形状(弧线/直线) × 方向(张/收)
+// 张 = 向 extendedFoot() 伸出，收 = 回到 defaultStandingFoot()
+enum LegPrimitive {
+    PRIM_ARC_EXTEND,   // a弧线张：带抬腿弧的伸出（摆动相）   
+    PRIM_ARC_RETRACT,  // b弧线收：带抬腿弧的收回（摆动相）   
+    PRIM_LINE_EXTEND,  // c直线张：贴地直线伸出（支撑相推地） 
+    PRIM_LINE_RETRACT  // d直线收：贴地直线收回（支撑相推地） 
+};
+
 class SingleLeg {
 public:
     // 只需腿 ID（0~5）；2 个舵机引脚由 Config.h 的 SERVO_PINS[legId] 决定
@@ -41,6 +50,14 @@ public:
                    TrajectoryMode mode,
                    unsigned long durationMs);
 
+    // 执行一条单腿原语：自动填起终点与抬腿高度。
+    // 起点 = 当前足端（避免跳变），终点 = 张→伸出脚 / 收→站立脚；
+    // 弧线 → 抬腿拱弧（抬腿高度 = arcLift），直线 → 贴地直线。
+    void startPrimitive(LegPrimitive prim, unsigned long durationMs);
+
+    // 设置弧线原语的默认抬腿高度（cm），默认 3.0
+    void setArcLift(float cm) { arcLift = cm; }
+
     void update();   // 每帧调用（放 loop），推进轨迹并写舵机
     bool isMoving() const { return isMovingFlag; }   // 是否仍在运动中
 
@@ -55,6 +72,7 @@ private:
     float startX, startY;
     float targetX, targetY;
     float liftHeight;
+    float arcLift;          // 弧线原语默认抬腿高度（cm）
     TrajectoryMode currentMode;
     unsigned long startTime;
     unsigned long duration;

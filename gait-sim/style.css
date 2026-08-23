@@ -1,0 +1,45 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #14161d;
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; color: #dfe3ee; }
+#app { position: fixed; inset: 0; }
+#bootError { position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+  background: #5c1f22; color: #ffb3b3; padding: 8px 16px; border-radius: 8px;
+  font-size: 13px; z-index: 99; display: none; }
+#bootError:empty { display: none; }
+
+#panel { position: fixed; top: 10px; right: 10px; width: 310px;
+  max-height: calc(100vh - 20px); overflow-y: auto;
+  background: rgba(22, 25, 36, 0.94); border: 1px solid #333a52; border-radius: 10px;
+  padding: 12px 14px; z-index: 10; box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
+h1 { font-size: 15px; margin: 0 0 2px; color: #fff; }
+.sub { font-size: 11px; color: #8b93a8; margin: 0 0 10px; }
+section { margin-bottom: 11px; border-top: 1px solid #2a2f42; padding-top: 9px; }
+h2 { font-size: 12px; margin: 0 0 6px; color: #7fd0ff; letter-spacing: 1px; }
+label { display: block; font-size: 12.5px; padding: 2px 0; cursor: pointer; }
+.dim { color: #7a8298; font-size: 11px; }
+input[type=range] { width: 108px; vertical-align: middle; }
+.row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin: 3px 0; }
+.row span:first-child { width: 62px; color: #9aa3ba; }
+#phiVal { width: 34px; text-align: right; color: #7fd0ff; }
+.quick { margin: 2px 0 6px; }
+button { background: #2c3247; color: #dfe3ee; border: 1px solid #3a4158;
+  border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+button:hover { background: #3a4158; }
+button.active { background: #1f6fb2; border-color: #4fc3f7; }
+.q { padding: 2px 7px; font-size: 11px; margin: 1px 2px; }
+#pairRow { margin-top: 4px; }
+#pairRow .pairBtn { margin: 2px; }
+
+#hud { position: fixed; left: 10px; bottom: 10px;
+  background: rgba(22, 25, 36, 0.92); border: 1px solid #333a52; border-radius: 8px;
+  padding: 8px 10px; font-size: 11.5px; z-index: 10; }
+#hud table { border-collapse: collapse; }
+#hud td, #hud th { padding: 1px 8px; text-align: center; }
+#hud th { color: #7fd0ff; font-weight: 600; }
+#hud td:first-child { text-align: left; }
+#status { margin-top: 6px; color: #9aa3ba; border-top: 1px solid #2a2f42; padding-top: 5px; }
+
+#notes { margin-top: 8px; font-size: 11.5px; color: #b6bed4; }
+#notes summary { cursor: pointer; color: #7fd0ff; }
+#notes ul { padding-left: 16px; margin: 6px 0; }
+#notes li { margin: 4px 0; line-height: 1.5; }

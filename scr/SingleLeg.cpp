@@ -8,6 +8,7 @@
 SingleLeg::SingleLeg(int id)
     : legId(id)
     , kin(robot::LENA, robot::LENB)   // 腿长取自 Config.h
+    , arcLift(3.0f)                   // 弧线原语默认抬腿 3cm，可用 setArcLift 改
     , currentMode(MODE_STANCE)
     , isMovingFlag(false) {}
 
@@ -78,6 +79,22 @@ void SingleLeg::startGrab(float sX, float sY,
 
     currentX = sX;
     currentY = sY;
+}
+
+// 执行单腿原语：方向(张/收)决定终点，形状(弧线/直线)决定轨迹模式与抬腿高度。
+// 起点取当前足端，保证连续调用不跳变（如上一原语被打断）。
+void SingleLeg::startPrimitive(LegPrimitive prim, unsigned long dur) {
+    bool extend = (prim == PRIM_ARC_EXTEND || prim == PRIM_LINE_EXTEND);
+    bool arc    = (prim == PRIM_ARC_EXTEND || prim == PRIM_ARC_RETRACT);
+
+    double tx, ty;
+    if (extend) extendedFoot(tx, ty);        // 张 → 伸出脚
+    else        defaultStandingFoot(tx, ty); // 收 → 站立脚
+
+    float lift = arc ? arcLift : 0.0f;
+    TrajectoryMode mode = arc ? MODE_SWING : MODE_STANCE;
+
+    startGrab(currentX, currentY, (float)tx, (float)ty, lift, mode, dur);
 }
 
 // 每帧推进轨迹：时间进度 → 平滑插值 → IK → 写舵机

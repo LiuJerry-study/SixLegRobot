@@ -14,5 +14,6 @@ void setup() {
 
 void loop() {
     // 1) 推进步态（每帧调用 update 完成插值并写舵机）
-    TripodGait::TriGaitWork();
+    tripodGait.TriGaitWork();
 }
+

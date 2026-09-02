@@ -100,8 +100,27 @@
   var bodyPos = { x: 0, y: S.bodyHeight, z: 0 };
   var bodyVel = { x: 0, y: 0, z: 0 };
 
+  const PHYS_M = 2.0, PHYS_G = 980; // 机身质量kg, 重力cm/s²
+
   // 初始化 Rapier 机器人位置
   if (physicsOK) Physics.setPosition(0, S.bodyHeight, 0);
+
+  // 垂直支撑 / 姿态稳定增益 —— 按刚体实际质量推导:
+  //   - 高度弹簧-阻尼: 支撑腿均分重量 + 悬浮于 S.bodyHeight (不再自由落体砸地)
+  //   - 水平恢复 + 偏航锁定: 机身保持水平、机头恒朝 0° (本构型无法偏航)
+  let MASS = PHYS_M;
+  if (physicsOK && Physics.ready()) {
+    const m = Physics.getMass();
+    if (isFinite(m) && m > 0) MASS = m;
+  }
+  const I_YAW  = 0.5 * MASS * CONFIG.bodyRadius * CONFIG.bodyRadius; // 绕竖轴惯量估计
+  const I_TILT = 0.5 * I_YAW;                                        // 绕水平轴惯量估计
+  const KV = MASS * Math.pow(2 * Math.PI * 1.8, 2);   // 高度弹簧刚度 (≈1.8Hz)
+  const CV = 1.7 * Math.sqrt(KV * MASS);              // 高度阻尼 (ζ≈0.85)
+  const KT = I_TILT * Math.pow(2 * Math.PI * 2.2, 2); // 水平恢复刚度 (≈2.2Hz)
+  const CT = 1.6 * Math.sqrt(KT * I_TILT);            // 水平阻尼 (ζ≈0.8)
+  const KY = I_YAW * Math.pow(2 * Math.PI * 0.8, 2);  // 偏航恢复刚度 (机头锁定 0°)
+  const CY = 2 * Math.sqrt(KY * I_YAW);               // 偏航阻尼 (临界)
 
   // Rapier 物理步进: 每帧对每条支撑腿施加弹簧-阻尼力到刚体
   function stepPhysics(res, dt) {
@@ -126,6 +145,7 @@
 
       if (!fp.pinned) {
         fp.pinned = true;
+        if (fp.r === null) fp.r = t.r;
         fp.fx = bodyPos.x + fp.r * ex;
         fp.fz = bodyPos.z + fp.r * ez;
       }
@@ -157,10 +177,33 @@
         fp.slipping = true;
       }
     }
+
+    // ---- 垂直支撑: 支撑腿均分重量 + 高度弹簧-阻尼 → 机身悬浮于 S.bodyHeight ----
+    // (替代"自由落体砸地"; 力作用于足端点, 天然提供倾斜恢复力矩)
+    const dy = S.bodyHeight - bodyPos.y;
+    const Fy = MASS * PHYS_G + KV * dy - CV * bodyVel.y;
+    for (let i = 0; i < 6; i++) {
+      if (res.targets[i].state === 'stance') {
+        Physics.addForceAtPoint(0, Fy / nStance, 0, foot[i].fx, 0, foot[i].fz);
+      }
+    }
+
+    // ---- 姿态稳定: getRotation() 求倾斜/偏航, getAngvel() 求角速度 ----
+    // 施加恢复力矩 + 阻尼 → 机身保持水平、机头恒朝 0° (与渲染一致)
+    const bq = Physics.getRotation();
+    const aw = Physics.getAngvel();
+    const ux = 2 * (bq.x * bq.y - bq.z * bq.w);   // 机身局部 +Y 的世界方向 (水平分量)
+    const uz = 2 * (bq.y * bq.z + bq.x * bq.w);
+    const psi = Math.atan2(2 * (bq.x * bq.z + bq.y * bq.w),   // 偏航角 (绕世界 Y)
+                           1 - 2 * (bq.x * bq.x + bq.y * bq.y));
+    Physics.addTorque(
+      -KT * uz - CT * aw.x,   // 滚转/俯仰恢复 + 阻尼
+      -KY * psi - CY * aw.y,  // 偏航锁定 (机头恒朝 0°) + 阻尼
+      KT * ux - CT * aw.z
+    );
+
     Physics.step();
   }
-
-  const PHYS_M = 2.0, PHYS_G = 980; // 机身质量kg, 重力cm/s²
 
   // ---------- 方位参考环 (挂在机器人上, 随机器人移动) ----------
   const azGroup = new THREE.Group();
@@ -349,6 +392,8 @@
     if (physicsOK && Physics.ready()) {
       Physics.setPosition(0, S.bodyHeight, 0);
     }
+    bodyPos.x = 0; bodyPos.y = S.bodyHeight; bodyPos.z = 0;
+    bodyVel.x = 0; bodyVel.y = 0; bodyVel.z = 0;
     for (const fp of foot) {
       fp.r = null; fp.pinned = false; fp.fx = 0; fp.fz = 0; fp.force = 0; fp.slipping = false;
     }
@@ -400,90 +445,123 @@
 
   function animate() {
     requestAnimationFrame(animate);
-    const dt = Math.min(clock.getDelta(), 0.05);
-    if (S.running) S.t += dt;
+    try {
+      const dt = Math.min(clock.getDelta(), 0.05);
+      if (S.running) S.t += dt;
 
-    const sweepMag = (CONFIG.R_HI - CONFIG.R_LO) * S.stride;
-    const cycleT = Math.min(4.0, Math.max(0.6, 1.8 / (0.3 + S.speed * 1.2)));
-    const res = planner.compute(S.mode, S.phiDeg, S.t, {
-      sweepMag, cycleT, lift: S.lift, pairIndex: S.pairIndex, bodyHeight: S.bodyHeight
-    });
+      const sweepMag = (CONFIG.R_HI - CONFIG.R_LO) * S.stride;
+      const cycleT = Math.min(4.0, Math.max(0.6, 1.8 / (0.3 + S.speed * 1.2)));
+      const res = planner.compute(S.mode, S.phiDeg, S.t, {
+        sweepMag, cycleT, lift: S.lift, pairIndex: S.pairIndex, bodyHeight: S.bodyHeight
+      });
 
-    // 摩擦动力学: Rapier 刚体 + 足端弹簧-阻尼力
-    if (S.running) {
-      if (physicsOK) {
-        stepPhysics(res, dt);
-      } else {
-        // 无物理模式: 直接用步态规划器的足端位置
-        for (let i = 0; i < 6; i++) {
-          foot[i].r = res.targets[i].r;
-          foot[i].force = 0;
-          foot[i].slipping = false;
+      // 摩擦动力学: Rapier 刚体 + 足端弹簧-阻尼力
+      if (S.running) {
+        if (physicsOK) {
+          stepPhysics(res, dt);
+        } else {
+          // 无物理模式: 直接用步态规划器的足端位置 + 简单位移估算
+          for (let i = 0; i < 6; i++) {
+            foot[i].r = res.targets[i].r;
+            foot[i].force = 0;
+            foot[i].slipping = false;
+          }
+          if (res.dir) {
+            const sf = S.mode === 'ripple' ? (1 - 1 / 6) : 0.5;
+            const vScale = (sweepMag / (sf * cycleT)) * (S.mode === 'tripod' ? 2 / 3 : 0.5);
+            const px = bodyPos.x, pz = bodyPos.z;
+            bodyPos.x += res.dir.x * vScale * S.speed * dt;
+            bodyPos.z += res.dir.z * vScale * S.speed * dt;
+            if (dt > 1e-6) {   // 由位移估算机身速度, 供 HUD 显示 (离线模式)
+              bodyVel.x = (bodyPos.x - px) / dt;
+              bodyVel.z = (bodyPos.z - pz) / dt;
+              bodyVel.y = 0;
+            }
+          }
         }
       }
-    }
 
-    // 从 Rapier 读取机身实际状态, 同步到 Three.js
-    if (physicsOK && Physics.ready()) {
-      var bp = Physics.getPosition();
-      var bv = Physics.getLinvel();
-      bodyPos.x = bp.x; bodyPos.y = bp.y; bodyPos.z = bp.z;
-      bodyVel.x = bv.x; bodyVel.y = bv.y; bodyVel.z = bv.z;
-    }
-
-    // 用"实际"足端位置 (含滑移量) 渲染腿
-    for (let i = 0; i < 6; i++) {
-      res.targets[i].r = foot[i].r;
-      res.targets[i].slipping = foot[i].slipping;
-    }
-    robot.setPose(S.bodyHeight, res.targets);
-    for (let i = 0; i < 6; i++) robot.legs[i].slipping = foot[i].slipping;
-    robot.root.position.set(bodyPos.x, S.bodyHeight, bodyPos.z);
-
-    // 目标方向箭头
-    const ph = S.phiDeg * Math.PI / 180;
-    phiArrow.setDirection(new THREE.Vector3(Math.cos(ph), 0, Math.sin(ph)));
-
-    // 轨迹
-    if (S.showBodyTrail) trailPush(bodyTrail, bodyPos.x, 0.1, bodyPos.z);
-    if (S.showFootTrails) {
-      for (let i = 0; i < 6; i++) {
-        const leg = robot.legs[i];
-        const a = leg.azimuthDeg * Math.PI / 180;
-        trailPush(footTrails[i], bodyPos.x + leg.r * Math.cos(a), Math.max(0, leg.y), bodyPos.z + leg.r * Math.sin(a));
-      }
-    }
-
-    // 推力矢量 (支撑腿: 方向 = 实际推力方向, 长度 ∝ |F|/静摩擦极限; 滑移时红色)
-    for (let i = 0; i < 6; i++) {
-      const arrow = forceArrows[i];
-      const leg = robot.legs[i];
-      const fp = foot[i];
-      const cap = muS * footNormal;
-      if (S.showForces && leg.state === 'stance' && Math.abs(fp.force) > 0.5) {
-        const a = leg.azimuthDeg * Math.PI / 180;
-        const s = Math.sign(fp.force);
-        arrow.setDirection(new THREE.Vector3(Math.cos(a) * s, 0, Math.sin(a) * s));
-        arrow.setLength(1.5 + 13 * Math.min(Math.abs(fp.force), cap) / Math.max(cap, 1e-6), 2.5, 1.5);
-        arrow.setColor(fp.slipping ? 0xff5555 : 0x6fd08c);
-        arrow.position.set(bodyPos.x + leg.r * Math.cos(a), 0.3, bodyPos.z + leg.r * Math.sin(a));
-        arrow.visible = true;
+      // 从 Rapier 读取机身实际状态, 同步到 Three.js
+      // 高度/姿态直接使用物理值 (bp.y / 四元数), 不再恒用 S.bodyHeight 悬浮
+      let rootY = S.bodyHeight;
+      if (physicsOK && Physics.ready()) {
+        var bp = Physics.getPosition();
+        var bv = Physics.getLinvel();
+        var bq = Physics.getRotation();
+        if (isFinite(bp.x) && isFinite(bp.y) && isFinite(bp.z)) {
+          bodyPos.x = bp.x; bodyPos.y = bp.y; bodyPos.z = bp.z;
+          rootY = bp.y;
+        }
+        if (isFinite(bv.x) && isFinite(bv.y) && isFinite(bv.z)) {
+          bodyVel.x = bv.x; bodyVel.y = bv.y; bodyVel.z = bv.z;
+        }
+        if (isFinite(bq.x) && isFinite(bq.y) && isFinite(bq.z) && isFinite(bq.w)) {
+          robot.root.quaternion.set(bq.x, bq.y, bq.z, bq.w);
+        }
       } else {
-        arrow.visible = false;
+        robot.root.quaternion.identity();
       }
+
+      // NaN 防护: 如果 bodyPos 出现 NaN 则重置
+      if (!isFinite(bodyPos.x)) bodyPos.x = 0;
+      if (!isFinite(bodyPos.z)) bodyPos.z = 0;
+
+      // 用"实际"足端位置 (含滑移量) 渲染腿
+      for (let i = 0; i < 6; i++) {
+        res.targets[i].r = foot[i].r;
+        res.targets[i].slipping = foot[i].slipping;
+      }
+      robot.setPose(rootY, res.targets);
+      for (let i = 0; i < 6; i++) robot.legs[i].slipping = foot[i].slipping;
+      robot.root.position.set(bodyPos.x, rootY, bodyPos.z);
+
+      // 目标方向箭头
+      const ph = S.phiDeg * Math.PI / 180;
+      phiArrow.setDirection(new THREE.Vector3(Math.cos(ph), 0, Math.sin(ph)));
+
+      // 轨迹
+      if (S.showBodyTrail) trailPush(bodyTrail, bodyPos.x, 0.1, bodyPos.z);
+      if (S.showFootTrails) {
+        for (let i = 0; i < 6; i++) {
+          const leg = robot.legs[i];
+          const a = leg.azimuthDeg * Math.PI / 180;
+          trailPush(footTrails[i], bodyPos.x + leg.r * Math.cos(a), Math.max(0, leg.y), bodyPos.z + leg.r * Math.sin(a));
+        }
+      }
+
+      // 推力矢量 (支撑腿: 方向 = 实际推力方向, 长度 ∝ |F|/静摩擦极限; 滑移时红色)
+      for (let i = 0; i < 6; i++) {
+        const arrow = forceArrows[i];
+        const leg = robot.legs[i];
+        const fp = foot[i];
+        const cap = muS * footNormal;
+        if (S.showForces && leg.state === 'stance' && Math.abs(fp.force) > 0.5) {
+          const a = leg.azimuthDeg * Math.PI / 180;
+          const s = Math.sign(fp.force);
+          arrow.setDirection(new THREE.Vector3(Math.cos(a) * s, 0, Math.sin(a) * s));
+          arrow.setLength(1.5 + 13 * Math.min(Math.abs(fp.force), cap) / Math.max(cap, 1e-6), 2.5, 1.5);
+          arrow.setColor(fp.slipping ? 0xff5555 : 0x6fd08c);
+          arrow.position.set(bodyPos.x + leg.r * Math.cos(a), 0.3, bodyPos.z + leg.r * Math.sin(a));
+          arrow.visible = true;
+        } else {
+          arrow.visible = false;
+        }
+      }
+
+      // 跟随相机 (NaN 防护)
+      if (S.follow && isFinite(bodyPos.x) && isFinite(bodyPos.z)) {
+        controls.target.lerp(tmp.set(bodyPos.x, 8, bodyPos.z), 0.08);
+        camera.position.copy(controls.target).add(camOffset);
+      }
+
+      // HUD (节流)
+      hudTimer -= dt;
+      if (hudTimer <= 0) { hudTimer = 0.12; updateHUD(); }
+
+      controls.update();
+    } catch (e) {
+      console.error('[animate] 渲染循环异常:', e);
     }
-
-    // 跟随相机
-    if (S.follow) {
-      controls.target.lerp(tmp.set(bodyPos.x, 8, bodyPos.z), 0.08);
-      camera.position.copy(controls.target).add(camOffset);
-    }
-
-    // HUD (节流)
-    hudTimer -= dt;
-    if (hudTimer <= 0) { hudTimer = 0.12; updateHUD(); }
-
-    controls.update();
     renderer.render(scene, camera);
   }
 

@@ -1,0 +1,26 @@
+# ============================================================
+#  Git 忽略规则
+# ============================================================
+
+# ---- PlatformIO 构建产物（重要：一键更新.ps1 用 git add -A，会把这些提交上去）----
+.pio/
+.vscode/.browse.c_cpp.db*
+.vscode/.browse.VC.db*
+.vscode/launch.json
+.vscode/c_cpp_properties.json
+.vscode/arduino.json
+.vscode/extensions.json
+
+# ---- cpp/clangd 等 IDE 缓存 ----
+.cache/
+compile_commands.json
+
+# ---- Python（角度计算/ 工具虚拟环境）----
+__pycache__/
+*.py[cod]
+
+# ---- 系统 / 编辑器临时文件 ----
+.DS_Store
+Thumbs.db
+*.swp
+.idea/

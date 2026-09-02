@@ -8,6 +8,8 @@
  *   - 替代 main.js 中的手写 Euler 积分 + 库仑摩擦
  *
  * 单位: 厘米 / 秒 / 千克 (与项目一致)
+ * 注: Rapier 按 SI 解释数值, 本模块以 "1cm ≡ 1m" 的比例传入
+ *     (重力 -980、半径 6.8 等), 全链路力/力矩/质量数值自洽。
  * 全局挂载: window.Physics
  * ============================================================ */
 (function (g) {
@@ -41,7 +43,7 @@
 
       // 物理世界
       world = new RAPIER.World(GRAVITY);
-      world.timestep = 1 / 120;   // 固定 120 Hz 子步
+      world.timestep = 1 / 60;   // 固定 60 Hz, 与渲染帧率匹配
 
       // ---- 地面 (静态半空间, 法线 +Y) ----
       var gBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
@@ -109,10 +111,21 @@
     return { x: v.x, y: v.y, z: v.z };
   }
 
+  /* 刚体实际质量 (含碰撞体密度贡献, 用于重力补偿/控制器增益推导) */
+  function getMass() {
+    if (!robotBody) return 0;
+    return robotBody.mass();
+  }
+
   /* ---- 力 ---- */
   function addForce(fx, fy, fz) {
     if (!robotBody) return;
     robotBody.addForce({ x: fx, y: fy, z: fz }, true);
+  }
+
+  function addTorque(tx, ty, tz) {
+    if (!robotBody) return;
+    robotBody.addTorque({ x: tx, y: ty, z: tz }, true);
   }
 
   function addForceAtPoint(fx, fy, fz, px, py, pz) {
@@ -133,7 +146,9 @@
     getRotation: getRotation,
     getLinvel: getLinvel,
     getAngvel: getAngvel,
+    getMass: getMass,
     addForce: addForce,
+    addTorque: addTorque,
     addForceAtPoint: addForceAtPoint,
     ready: function () { return ready; }
   };

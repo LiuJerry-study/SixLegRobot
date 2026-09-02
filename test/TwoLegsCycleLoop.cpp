@@ -16,7 +16,7 @@
  *
  * 本文件为自包含版，直接在 Arduino IDE 里与以下源文件一起编译：
  *   include/Config.h、include/LegKinematics.h、include/ServoManager.h、
- *   include/SingleLeg.h、scr/LegKinematics.cpp、scr/ServoManager.cpp、scr/SingleLeg.cpp
+ *   include/SingleLeg.h、src/LegKinematics.cpp、src/ServoManager.cpp、src/SingleLeg.cpp
  */
 
 #include <Arduino.h>

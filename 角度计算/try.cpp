@@ -30,7 +30,7 @@ void iin(){
     return ;
 }
 void check(cdn m){
-    if(m.dist <= lena + lenb&&m.dist>=lena-lenb){
+    if(m.dist <= lena + lenb && m.dist>=fabs(lena-lenb)){
         cout<<"该位置合法（在可达范围内）"<<endl;
     } else {
         cout<<"该位置超出可达范围！"<<endl;
@@ -39,8 +39,12 @@ void check(cdn m){
 }
 void ccl(cdn& m){
     m.dist = sqrt(m.x*m.x + m.y*m.y);
+    if(m.dist < 1e-9) return;   // 原点附近无法构成角度，避免除零/NaN
     double cos1=(lena*lena+lenb*lenb-m.dist*m.dist)/(2*lena*lenb);
     double cos2=(lena*lena+m.dist*m.dist-lenb*lenb)/(2*lena*m.dist);
+    // 余弦夹逼到 [-1,1]，避免浮点误差使 acos 返回 NaN
+    if(cos1 > 1) cos1 = 1; else if(cos1 < -1) cos1 = -1;
+    if(cos2 > 1) cos2 = 1; else if(cos2 < -1) cos2 = -1;
     m.ag1=acos(cos1);
     m.ag2=acos(cos2)+atan2(m.x,m.y);
 }

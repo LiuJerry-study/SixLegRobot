@@ -5,7 +5,30 @@
 与 `include/Config.h` 的 LENA/LENB 一致）。
 机身不再匀速位移——按真实**库仑摩擦**模型（足底粘住/打滑）在惯性下加速减速。
 
-## 运行方式
+## 真机遥控模式（把本页变成机器人的控制程序）
+
+页面内置"🤖 真机遥控"面板（`js/control-panel.js`）：**在 3D 场景中点击/拖拽地面一个目标点，
+6 条腿的足端就同步运动到"以目标点距机心距离为半径"的目标环上**——每条腿沿自己的方位角径向伸缩，
+大腿/小腿舵机转到对应角度并全部执行。点击目标点只取**径向距离**（本构型足端无法左右摆动）。
+
+1. **烧固件**：`platformio.ini` 的 build_flags 设为 `-DMODE_SIX_LEGS_SYNC` 后 Upload；
+   该固件上电待命，串口 115200 接收命令（goto/dur/cycle/stop/home/pos/0/1 …）。
+2. **启动服务器**：双击仓库根目录 `start-control.bat`（自动开 http://localhost:8000 并起
+   `python -m http.server 8000`；本页必须经 localhost/http(s) 打开，file:// 双击不行）。
+3. **浏览器**：必须 Chrome 或 Edge（Web Serial API）。
+4. **连接串口**：点"🔌 连接串口"→ 选 ESP32 的 COM 口（115200）。**先关闭 PlatformIO
+   串口监视器**，否则端口被占用连不上。连接成功后可点"读状态(pos)"验证固件在线。
+5. **点目标点**：勾选"🎯 目标点遥控"（视角拖拽会暂停，把左键让给点选）→ 点击/拖拽地面；
+   橙色环 = 全体足端目标环（环上 6 个橙色点是各腿落点），蓝色针 = 点击位置；
+   同时向固件发送 `goto <x> <y>`，6 条腿平滑同步到位。面板显示换算后的
+   "髋外偏移 a / 固件坐标"，供核对。
+6. 其余按钮：站立(home) / 循环行走(cycle) / 停止(stop) / 读状态(pos)、动作时长滑块
+   （发 `dur <ms>`）、手动命令输入框（如 `0 90` 直控 6 条大腿）。
+
+> 换算关系：固件 `goto x y` 中 x = −(r − hipRadius)、y = −drop
+> （drop ≈ 机身高度 − hipDrop，默认 ≈6.8cm），与 `SingleLeg` 足端坐标约定一致。
+
+## 运行方式（仅模拟）
 
 **方式一（推荐，离线可用）**：双击打开 `index.html` 即可（three.js 已内置在 `lib/`）。
 物理引擎 Rapier 走 CDN，离线时自动降级为**无物理模式**（机身按简单位移估算运动，页面有提示）。
@@ -100,9 +123,12 @@ gait-sim/
 ├─ js/
 │  ├─ robot.js         三维模型 + 逆运动学（蜘蛛式构型, 尺寸与 Config.h 一致）
 │  ├─ gaits.js         步态规划器（三角/波纹/对腿, S 曲线扫掠）
-│  ├─ main.js          场景、相机、UI、摩擦动力学主循环
+│  ├─ main.js          场景、相机、UI、摩擦动力学主循环（含遥控模式 SimCore API）
+│  ├─ control-panel.js 真机遥控面板（Web Serial → ESP32：点地面=全体足端目标）
 │  └─ test-gait.js     单元测试（node js/test-gait.js 运行）
 └─ lib/                three.js r147 本地库（离线可用）
+
+仓库根目录 start-control.bat：一键启动可视化控制台（本目录 + 浏览器）。
 ```
 
 ## 自定义

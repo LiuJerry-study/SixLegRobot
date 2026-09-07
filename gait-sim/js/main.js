@@ -438,6 +438,39 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // ============================================================
+  // 遥控模式（由 js/control-panel.js 使用）
+  //   手动目标姿态：6 条腿足端同步落到"距机心 manual.r"的目标环上（贴地）。
+  //   进入后自动暂停自动步态（S.running = false），退出后按 ▶ 继续。
+  // ============================================================
+  const manual = { on: false, r: (CONFIG.R_LO + CONFIG.R_HI) / 2 };
+
+  // 遥控姿态目标：所有腿 state=hold, 足端在目标环上、贴地 y=0
+  function manualTargets() {
+    const out = [];
+    for (let i = 0; i < 6; i++) {
+      out.push({ r: manual.r, y: 0, state: 'hold', coeff: 0 });
+    }
+    return out;
+  }
+
+  window.SimCore = {
+    scene, camera, renderer, controls, CONFIG, S, robot,
+    getCenter() {
+      return { x: bodyPos.x, y: robot.root.position.y, z: bodyPos.z };
+    },
+    manual,
+    // 进入/退出遥控姿态模式；进入时自动暂停自动步态
+    setManual(on, r) {
+      manual.on = !!on;
+      if (typeof r === 'number' && isFinite(r)) {
+        manual.r = Math.max(CONFIG.R_LO, Math.min(CONFIG.R_HI, r));
+      }
+      if (manual.on) S.running = false;
+    },
+    isManualOn() { return manual.on; }
+  };
+
   // ---------- 主循环 ----------
   const clock = new THREE.Clock();
   let hudTimer = 0;
@@ -447,13 +480,22 @@
     requestAnimationFrame(animate);
     try {
       const dt = Math.min(clock.getDelta(), 0.05);
+
+      // 遥控姿态模式：接管足端目标并冻结自动步态/物理
+      const manualOn = manual.on;
+      if (manualOn) {
+        S.running = false;
+        for (let i = 0; i < 6; i++) foot[i].r = manual.r;   // 供渲染取"实际足端位置"
+      }
       if (S.running) S.t += dt;
 
       const sweepMag = (CONFIG.R_HI - CONFIG.R_LO) * S.stride;
       const cycleT = Math.min(4.0, Math.max(0.6, 1.8 / (0.3 + S.speed * 1.2)));
-      const res = planner.compute(S.mode, S.phiDeg, S.t, {
-        sweepMag, cycleT, lift: S.lift, pairIndex: S.pairIndex, bodyHeight: S.bodyHeight
-      });
+      const res = manualOn
+        ? { dir: null, targets: manualTargets() }
+        : planner.compute(S.mode, S.phiDeg, S.t, {
+            sweepMag, cycleT, lift: S.lift, pairIndex: S.pairIndex, bodyHeight: S.bodyHeight
+          });
 
       // 摩擦动力学: Rapier 刚体 + 足端弹簧-阻尼力
       if (S.running) {

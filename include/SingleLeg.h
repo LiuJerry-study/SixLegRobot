@@ -61,6 +61,10 @@ public:
     void update();   // 每帧调用（放 loop），推进轨迹并写舵机
     bool isMoving() const { return isMovingFlag; }   // 是否仍在运动中
 
+    // 当前足端坐标（cm，原点=髋关节），调试/外部读取用
+    float footX() const { return currentX; }
+    float footY() const { return currentY; }
+
 private:
     int legId;
     LegKinematics kin;   // 腿长取自 Config.h（LENA 大腿 / LENB 小腿）

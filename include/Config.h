@@ -14,8 +14,8 @@ namespace robot {
     // 腿长（cm），实测硬件：大腿 8cm、小腿 13cm。
     // 默认站立时小腿竖直并与最小圆（内圆，半径 |LENA-LENB| = 5cm）负侧相切，
     // 脚落在膝正下方（髋外侧 5cm、下方 6.755cm）。
-    constexpr double LENA = 8.0;   // 大腿长
-    constexpr double LENB = 13.0;  // 小腿长
+    constexpr double LENA = 6.5;   // 大腿长
+    constexpr double LENB = 12.5;  // 小腿长
 
     // 6 条腿 × 2 个舵机（大腿、小腿）对应的 PCA9685 输出通道（ch0~ch11）：
     //   leg0=ch0/1, leg1=ch2/3, leg2=ch4/5, leg3=ch6/7, leg4=ch8/9, leg5=ch10/11

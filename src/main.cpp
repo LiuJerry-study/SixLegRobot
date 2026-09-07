@@ -9,7 +9,16 @@
  *   -DMODE_SINGLE_LEG_GRAB 单腿不断抓地（行走/刨地循环）★新增
  *   -DMODE_TWO_LEGS      两腿顺序串联，跑一个周期  （原 TwoLegsTest.cpp）
  *   -DMODE_TWO_LEGS_CYCLE 两腿同步/反相无限循环   （原 TwoLegsCycleLoop.cpp）
- *   -DMODE_TRIPOD        完整三角步态（六足）     （原 TripodGaitTest.cpp）★默认
+ *   -DMODE_TRIPOD        完整三角步态（六足）     （原 TripodGaitTest.cpp）
+ *   -DMODE_SERVO_TEST    通用舵机测试（扫描/同步/串口控制）★新增
+ *   -DMODE_SINGLE_SERVO_TEST 平台单舵机测试（串口交互式，测任意 1 路）★新增
+ *   -DMODE_SINGLE_LEG_TEST   单腿测试（串口交互式，循环/定位/调参）★新增
+ *   -DMODE_SIX_LEGS_SYNC     六腿同步测试（单腿测试动作扩展为 6 腿同步）★新增
+ *
+ *  ★ PlatformIO 用法：见 platformio.ini，改 build_flags 里的 -DMODE_XXX 即可。
+ *    舵机测试的串口命令：
+ *       sweep      → 通道逐个扫描     all → 全部同步扫描     mode 3 → 串口精确控制
+ *       <通道> <角> → 串口控制模式下精确转动（如 "0 90"）
  *
  * 切换方法：改 platformio.ini 里 build_flags 的 "-DMODE_XXX"，
  *           然后重新 Upload 即可。
@@ -195,6 +204,123 @@
     void loop() {
         tripodGait.TriGaitWork();
     }
+
+#elif defined(MODE_SERVO_TEST)
+    // ---- 模式7：通用舵机测试（PCA9685 驱动，多通道）----
+    // 兼容 Arduino/PlatformIO。用串口命令控制：
+    //   sweep → 通道逐个扫描；all → 全部同步扫描；mode 3 → 串口精确控制
+    //   串口控制模式下输入 "<通道> <角度>"（如 "0 90"）精确转到某角度
+    #include <Wire.h>
+    #include <Adafruit_PWMServoDriver.h>
+    #include "Config.h"
+
+    Adafruit_PWMServoDriver servoPwm = Adafruit_PWMServoDriver(PCA9685_I2C_ADDR);
+    const int SERVO_TEST_COUNT = 12;   // 测试的通道数（按接线改，最多16）
+    int servoTestMode = 1;             // 1=逐个扫描 2=同步扫描 3=串口控制
+    int8_t sv_goingUp[SERVO_TEST_COUNT];
+    int sv_angle[SERVO_TEST_COUNT];
+    bool sv_inited = false;
+
+    int svAngleToPulse(float deg) {
+        deg = constrain(deg, 0.0f, 180.0f);
+        return (int)(SERVO_MIN_PULSE_CNT + (SERVO_MAX_PULSE_CNT - SERVO_MIN_PULSE_CNT) * (deg / 180.0f));
+    }
+
+    void svWrite(int ch, float deg) {
+        if (ch < 0 || ch > 15) return;
+        servoPwm.setPWM(ch, 0, svAngleToPulse(deg));
+    }
+
+    void svSweepStep(int channel) {
+        if (!sv_inited) {
+            for (int c = 0; c < SERVO_TEST_COUNT; c++) { sv_angle[c] = 30; sv_goingUp[c] = 1; }
+            sv_inited = true;
+        }
+        sv_angle[channel] += sv_goingUp[channel];
+        if (sv_angle[channel] >= 150) { sv_angle[channel] = 150; sv_goingUp[channel] = -1; }
+        if (sv_angle[channel] <= 30)  { sv_angle[channel] = 30;  sv_goingUp[channel] = 1; }
+        svWrite(channel, sv_angle[channel]);
+    }
+
+    void svCenterAll() {
+        for (int c = 0; c < SERVO_TEST_COUNT; c++) svWrite(c, 90.0f);
+    }
+
+    bool svIsNumeric(const String& s) {
+        if (s.length() == 0) return false;
+        for (unsigned int i = 0; i < s.length(); i++) {
+            char ch = s[i];
+            if (!(ch >= '0' && ch <= '9') && ch != '-' && ch != '.') return false;
+        }
+        return true;
+    }
+
+    void svHandle(const String& line) {
+        if (line.equalsIgnoreCase("sweep")) { servoTestMode = 1; svCenterAll(); Serial.println("Mode: AUTO SWEEP"); return; }
+        if (line.equalsIgnoreCase("all"))   { servoTestMode = 2; svCenterAll(); Serial.println("Mode: ALL SWEEP"); return; }
+        if (line.equalsIgnoreCase("mode 3")){ servoTestMode = 3; Serial.println("Mode: SERIAL (<ch> <angle>)"); return; }
+        int sp = line.indexOf(' ');
+        if (sp <= 0) { Serial.println("! 格式 <通道> <角度> 或 sweep/all/mode 3"); return; }
+        String a = line.substring(0, sp); a.trim();
+        String b = line.substring(sp + 1);  b.trim();
+        if (!svIsNumeric(a) || !svIsNumeric(b)) { Serial.println("! 请输入数字"); return; }
+        int ch = a.toInt(); float ang = b.toFloat();
+        if (ch < 0 || ch >= SERVO_TEST_COUNT) { Serial.println("! 通道越界"); return; }
+        ang = constrain(ang, 0.0f, 180.0f);
+        servoTestMode = 3;
+        svWrite(ch, ang);
+        Serial.printf("CH%d -> %.0f\n", ch, ang);
+    }
+
+    void setup() {
+        Serial.begin(115200); delay(200);
+        Wire.begin(PCA9685_SDA_PIN, PCA9685_SCL_PIN);
+        servoPwm.begin();
+        servoPwm.setOscillatorFrequency(PCA9685_OSC_FREQ_HZ);
+        servoPwm.setPWMFreq(PCA9685_PWM_FREQ_HZ);
+        svCenterAll();
+        Serial.println("Mode=SERVO_TEST");
+        Serial.println("sweep=逐个扫描  all=同步扫描  mode 3=串口控制(<ch> <angle>)");
+        Serial.println("初始=逐个扫描");
+    }
+
+    void loop() {
+        if (Serial.available() > 0) {
+            String line = Serial.readStringUntil('\n'); line.trim();
+            if (line.length() > 0) svHandle(line);
+            delay(5);
+        }
+        static unsigned long prev = 0;
+        unsigned long now = millis();
+        if (now - prev < 15) return;
+        prev = now;
+        if (servoTestMode == 1) { static int ch = 0; svSweepStep(ch); ch = (ch + 1) % SERVO_TEST_COUNT; }
+        else if (servoTestMode == 2) { for (int c = 0; c < SERVO_TEST_COUNT; c++) svSweepStep(c); }
+    }
+
+#elif defined(MODE_SINGLE_SERVO_TEST)
+    // ---- 模式8：平台单舵机测试（串口交互式）----
+    // 串口命令：help / map / center / sweep <ch> / sweep leg <l> <j> /
+    //           stop / <ch> <angle> / leg <l> <j> <angle>
+    // 完整说明见 test/SingleServoTest.cpp（自包含文件，此处直接引用）
+    #include "../test/SingleServoTest.cpp"
+
+#elif defined(MODE_SINGLE_LEG_TEST)
+    // ---- 模式9：单腿测试（串口交互式）----
+    // 串口命令：help / cycle / one / home / goto <x> <y> / lift <cm> /
+    //           dur <ms> / pos / stop
+    // 完整说明见 test/SingleLegTest.cpp（自包含文件，此处直接引用）
+    #include "../test/SingleLegTest.cpp"
+
+#elif defined(MODE_SIX_LEGS_SYNC)
+    // ---- 模式10：六腿同步测试（串口交互式）----
+    // 单腿测试的动作扩展为 6 腿同步：所有腿同一时刻做同一动作，
+    // 每步等 6 腿全部完成后一起进入下一步（严格同步）。
+    // 串口命令：help / cycle / one / home / goto <x> <y> / lift <cm> /
+    //           dur <ms> / 0 <角度>(6条大腿直控) / 1 <角度>(6条小腿直控) /
+    //           pos / stop
+    // 完整说明见 test/SixLegsSyncTest.cpp（自包含文件，此处直接引用）
+    #include "../test/SixLegsSyncTest.cpp"
 
 #else
     #error "未定义运行模式！请在 platformio.ini 的 build_flags 中定义 -DMODE_XXX"

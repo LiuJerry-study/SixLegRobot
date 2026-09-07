@@ -43,3 +43,25 @@ button.active { background: #1f6fb2; border-color: #4fc3f7; }
 #notes summary { cursor: pointer; color: #7fd0ff; }
 #notes ul { padding-left: 16px; margin: 6px 0; }
 #notes li { margin: 4px 0; line-height: 1.5; }
+
+/* ===== 真机遥控面板 (js/control-panel.js) ===== */
+#rcSection h2 { margin-top: 2px; }
+.rcDot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 7px; }
+.rcDot.off { background: #ff6b6b; box-shadow: 0 0 6px #ff6b6b88; }
+.rcDot.on { background: #6fd08c; box-shadow: 0 0 6px #6fd08c88; }
+#rcConnTxt { color: #dfe3ee; }
+.rcBtnRow { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0; }
+button.rcPrimary { background: #1f6fb2; border-color: #4fc3f7; }
+button.rcPrimary:hover { background: #2783ce; }
+.rcHint { margin: 3px 0 0; line-height: 1.5; }
+.rcNum { width: 52px; text-align: right; color: #7fd0ff; font-size: 12px; }
+.rcInline { display: flex; align-items: center; gap: 6px; }
+#rcCmdIn { flex: 1; min-width: 0; background: #10131c; color: #dfe3ee;
+  border: 1px solid #3a4158; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
+.rcMeta { font-size: 11px; color: #9aa3ba; margin: 4px 0; line-height: 1.6; }
+#rcLastCmd { color: #7fd0ff; word-break: break-all; }
+#rcLog { width: 100%; height: 130px; background: #10131c; color: #c8d2e4;
+  border: 1px solid #333a52; border-radius: 6px; padding: 6px;
+  font: 11px/1.55 Consolas, "Courier New", monospace; white-space: pre-wrap;
+  word-break: break-all; overflow-y: auto; margin: 6px 0 2px; }

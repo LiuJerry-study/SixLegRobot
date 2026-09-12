@@ -1,3 +1,4 @@
+/* 全局 + 骨架: 画布 #app / 报错 #bootError / 控制面板 #panel / HUD #hud */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #14161d;
   font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif; color: #dfe3ee; }
@@ -44,7 +45,7 @@ button.active { background: #1f6fb2; border-color: #4fc3f7; }
 #notes ul { padding-left: 16px; margin: 6px 0; }
 #notes li { margin: 4px 0; line-height: 1.5; }
 
-/* ===== 真机遥控面板 (js/control-panel.js) ===== */
+/* 遥控 / 孪生面板共用控件（节点由 JS 运行时创建, index.html 里没有） */
 #rcSection h2 { margin-top: 2px; }
 .rcDot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
   margin-right: 7px; }
@@ -57,7 +58,7 @@ button.rcPrimary:hover { background: #2783ce; }
 .rcHint { margin: 3px 0 0; line-height: 1.5; }
 .rcNum { width: 52px; text-align: right; color: #7fd0ff; font-size: 12px; }
 .rcInline { display: flex; align-items: center; gap: 6px; }
-#rcCmdIn { flex: 1; min-width: 0; background: #10131c; color: #dfe3ee;
+#rcCmdIn, #twinCmdIn { flex: 1; min-width: 0; background: #10131c; color: #dfe3ee;
   border: 1px solid #3a4158; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
 .rcMeta { font-size: 11px; color: #9aa3ba; margin: 4px 0; line-height: 1.6; }
 #rcLastCmd { color: #7fd0ff; word-break: break-all; }
@@ -65,3 +66,44 @@ button.rcPrimary:hover { background: #2783ce; }
   border: 1px solid #333a52; border-radius: 6px; padding: 6px;
   font: 11px/1.55 Consolas, "Courier New", monospace; white-space: pre-wrap;
   word-break: break-all; overflow-y: auto; margin: 6px 0 2px; }
+
+/* 两模式开关（main.js setAppMode() 切 .active / .hidden） */
+#modeSwitch { display: flex; gap: 6px; margin: 2px 0 10px; }
+.modeBtn { flex: 1; padding: 6px 4px; font-size: 12px; line-height: 1.5;
+  border-radius: 8px; text-align: center; }
+.modeBtnHang { background: #243b55; border-color: #3a6a99; }
+.modeBtnGround { background: #243b2e; border-color: #3a9949; }
+.modeBtn.active.modeBtnHang { background: #1f6fb2; border-color: #4fc3f7; }
+.modeBtn.active.modeBtnGround { background: #1f7a3d; border-color: #6fd08c; }
+.modeTag { display: block; font-size: 10px; opacity: 0.75; font-weight: normal; }
+.hidden { display: none !important; }   /* 面板/分区显隐统一用它 */
+
+/* 悬空孪生面板: 状态行 #twinStat / 12 通道角度表（twin-panel.js 运行时建 .twRow/.twBar/.twFill/.twVal） */
+#twinPanel h2 { margin-top: 2px; }
+#twinPanel code { background: #10131c; padding: 0 4px; border-radius: 4px;
+  font: 11px Consolas, monospace; color: #9fd8ff; }
+#twinStat { font-size: 11px; color: #9aa3ba; margin: 6px 0; }
+.twChWrap { margin: 4px 0; }
+.twRow { display: flex; align-items: center; gap: 6px; margin: 2px 0;
+  font-size: 11px; }
+.twLabel { width: 96px; color: #c6d2e8; flex: none; }
+.twLabel.tib { color: #ffd9a3; }
+.twBar { flex: 1; height: 9px; background: #10131c; border: 1px solid #333a52;
+  border-radius: 5px; overflow: hidden; }
+.twFill { height: 100%; width: 0%; background: linear-gradient(90deg, #1f6fb2, #4fc3f7);
+  transition: width 0.1s linear; }
+.twRow:nth-child(even) .twFill { background: linear-gradient(90deg, #1f7a3d, #6fd08c); }
+.twVal { width: 52px; text-align: right; color: #7fd0ff; font-family: Consolas, monospace;
+  flex: none; }
+
+/* 孪生控制台: 固件模式 #twinFwSel / 命令参考 .cmdRefList / 折叠区 .twinDetails */
+#twinFwSel { flex: 1; min-width: 0; background: #10131c; color: #dfe3ee;
+  border: 1px solid #3a4158; border-radius: 6px; padding: 3px 6px; font-size: 11.5px; }
+#twinPanel .twinDetails { margin-top: 5px; border-top: 1px solid #2a2f42; padding-top: 6px; }
+#twinPanel .twinDetails summary { cursor: pointer; color: #7fd0ff; font-size: 11.5px; }
+#twinPanel .cmdRefBody { margin-top: 4px; }
+#twinPanel .cmdRefList { list-style: none; margin: 5px 0 2px; padding: 0; }
+#twinPanel .cmdRefList li { display: flex; gap: 8px; align-items: baseline;
+  font-size: 11px; line-height: 1.65; color: #b6bed4; }
+#twinPanel .cmdRefList code { flex: none; min-width: 104px; color: #9fd8ff; }
+#twinPanel .cmdRefList span { flex: 1; min-width: 0; }

@@ -1,21 +1,11 @@
-/* ============================================================
- * physics.js — Rapier 3D 物理引擎封装
- *
- * 功能:
- *   - 异步加载 Rapier WASM (compat 版本, 内嵌 base64)
- *   - 创建物理世界 (重力, 地面, 机器人刚体)
- *   - 提供力施加 / 状态查询接口
- *   - 替代 main.js 中的手写 Euler 积分 + 库仑摩擦
- *
- * 单位: 厘米 / 秒 / 千克 (与项目一致)
- * 注: Rapier 按 SI 解释数值, 本模块以 "1cm ≡ 1m" 的比例传入
- *     (重力 -980、半径 6.8 等), 全链路力/力矩/质量数值自洽。
- * 全局挂载: window.Physics
- * ============================================================ */
+/* physics.js — Rapier 3D 物理引擎封装: 加载 WASM、建世界(重力/地面/刚体)、施加力、查位姿。
+ * 库仑摩擦不在这里, 由 main.js 以「力封顶」实现。
+ * 单位: 厘米 / 秒 / 千克 —— 以 "1cm ≡ 1m" 的比例喂给 Rapier(SI), 全链路数值自洽。
+ * 全局挂载: window.Physics */
 (function (g) {
   'use strict';
 
-  /* ---- 物理常量 ---- */
+  /* 物理常量 */
   const GRAVITY   = { x: 0, y: -980, z: 0 };   // cm/s²
   const BODY_MASS = 2.0;                          // kg
   const BODY_RADIUS = 6.8;                        // cm (六棱柱外接圆)
@@ -24,13 +14,13 @@
   const LINEAR_DAMP = 0.3;                        // 线性阻尼
   const ANGULAR_DAMP = 2.5;                       // 角阻尼
 
-  /* ---- 内部状态 ---- */
+  /* 内部状态 */
   let RAPIER     = null;
   let world      = null;
   let robotBody  = null;
   let ready      = false;
 
-  /* ---- 初始化 ---- */
+  /* 初始化 */
   async function init() {
     if (ready) return true;
     try {
@@ -41,17 +31,18 @@
       RAPIER = mod.default || mod;
       await RAPIER.init();
 
-      // 物理世界
+      // 物理世界 (步长固定 1/60s: main.js 每渲染帧调一次 step(), 不按真实帧间隔缩放)
       world = new RAPIER.World(GRAVITY);
-      world.timestep = 1 / 60;   // 固定 60 Hz, 与渲染帧率匹配
 
-      // ---- 地面 (静态半空间, 法线 +Y) ----
+      world.timestep = 1 / 60;
+
+      // 地面 (静态半空间, 法线 +Y)
       var gBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
       var gColl = RAPIER.ColliderDesc.halfspace({ x: 0, y: 1, z: 0 });
       gColl.setFriction(GROUND_FRIC);
       world.createCollider(gColl, gBody);
 
-      // ---- 机器人刚体 (动态) ----
+      // 机器人刚体 (动态)
       var rDesc = RAPIER.RigidBodyDesc.dynamic();
       rDesc.setAdditionalMass(BODY_MASS);
       rDesc.setLinearDamping(LINEAR_DAMP);
@@ -73,13 +64,13 @@
     }
   }
 
-  /* ---- 世界步进 ---- */
+  /* 世界步进 */
   function step() {
     if (!world) return;
     world.step();
   }
 
-  /* ---- 机器人位姿 ---- */
+  /* 机器人位姿 */
   function setPosition(x, y, z) {
     if (!robotBody) return;
     robotBody.setTranslation({ x: x, y: y, z: z }, true);
@@ -88,6 +79,7 @@
   }
 
   function getPosition() {
+    // ⚠ 兜底值 y=7.8 是旧口径（当前默认站高 11.0），仅未初始化时走到
     if (!robotBody) return { x: 0, y: 7.8, z: 0 };
     var p = robotBody.translation();
     return { x: p.x, y: p.y, z: p.z };
@@ -117,7 +109,7 @@
     return robotBody.mass();
   }
 
-  /* ---- 力 ---- */
+  /* 力 */
   function addForce(fx, fy, fz) {
     if (!robotBody) return;
     robotBody.addForce({ x: fx, y: fy, z: fz }, true);
@@ -137,7 +129,7 @@
     );
   }
 
-  /* ---- 暴露 API ---- */
+  /* 暴露 API */
   g.Physics = {
     init: init,
     step: step,

@@ -1,7 +1,9 @@
 /* ============================================================
- * test-gait.js — 单元测试 (node 运行)
- *   验证: IK 正解回代 / 三角步态符号与方向 / 波纹一次一腿 / 对腿限制
- * 运行: node js/test-gait.js
+ * test-gait.js — 单元测试 (node 运行, 只测 robot.js + gaits.js 的纯计算)
+ *   覆盖: IK 正解回代与蜘蛛拱形特征 / 三角步态分组与符号、任意方向净推力 /
+ *         波纹任意时刻只动一条腿 / 对腿沿对轴平移 / 500 次随机采样无 NaN
+ *   不覆盖: Rapier 物理、悬空孪生映射(@SERVO)、UI
+ * 运行: node js/test-gait.js  (经 globalThis 取 Robot / GaitPlanner)
  * ============================================================ */
 'use strict';
 require('./robot.js');
@@ -16,12 +18,13 @@ function check(name, cond) {
   console.log((cond ? '  \u2713 ' : '  \u2717 ') + name);
   if (!cond) fail++;
 }
-const opts = { sweepMag: 2.0, cycleT: 1, lift: 2.0, pairIndex: 0, bodyHeight: 7.8 };
+// bodyHeight 只是与 main.js 调用口径保持一致, compute() 并不读它
+const opts = { sweepMag: 2.0, cycleT: 1, lift: 2.0, pairIndex: 0, bodyHeight: 11.0 };
 const R_MID = (CONFIG.R_LO + CONFIG.R_HI) / 2;
 
 console.log('— 蜘蛛折腿 IK 正解验证 (足端位置回代) —');
-// 可达环: |L1−L2|=5 ≤ d ≤ L1+L2=21 (取固件站立足/伸出足及中间若干点)
-for (const [a, drop] of [[5.0, 6.755], [6.0, 8.0], [12.0, 6.0], [14.9, 6.755], [8.0, 10.0]]) {
+// 可达环: |L1−L2|=6 ≤ d ≤ L1+L2=19 (取固件站立足/伸出足及中间若干点)
+for (const [a, drop] of [[6.0, 10.0], [8.0, 10.0], [12.0, 8.0], [12.8, 10.0], [10.0, 12.0]]) {
   const { th1, th2 } = solveIK(a, drop);
   // 正解: 足端 = L1·(cosα,sinα) + L2·(cos(α+π+β), sin(α+π+β)) = (a, −drop)
   const x = CONFIG.L1 * Math.cos(th1) + CONFIG.L2 * Math.cos(th1 + Math.PI + th2);
@@ -30,17 +33,17 @@ for (const [a, drop] of [[5.0, 6.755], [6.0, 8.0], [12.0, 6.0], [14.9, 6.755], [
     Math.abs(x - a) < 1e-6 && Math.abs(y + drop) < 1e-6);
 }
 {
-  // 蜘蛛拱形特征: 固件默认站立足 (a=5, drop=6.755) 大腿上抬、膝盖高于髋、小腿竖直向下
-  const { th1, th2 } = solveIK(5.0, 6.755);
+  // 蜘蛛拱形特征: 固件默认站立足 (a=6, drop=10) 大腿上抬、膝盖高于髋、小腿竖直向下
+  const { th1, th2 } = solveIK(6.0, 10.0);
   const kneeY = CONFIG.L1 * Math.sin(th1);                       // 膝盖相对髋的高度
   const shinDown = Math.sin(th1 + Math.PI + th2);                // 小腿方向 y 分量
   check('默认站姿: 大腿上抬 (α>0)', th1 > 0);
   check('默认站姿: 膝盖高于髋', kneeY > 0);
   check('默认站姿: 小腿向下折回', shinDown < 0);
   check('默认站姿: 小腿竖直 (脚在膝正下方)', Math.abs(shinDown + 1) < 1e-6);
-  // 极限: 直腿 d=L1+L2=21 → β=π; 完全折回 d=|L1−L2|=5 → β=0
-  const straight = solveIK(Math.sqrt(441 - 9), 3);               // d=21
-  const folded = solveIK(0, 5);                                  // d=5
+  // 极限: 直腿 d=L1+L2=19 → β=π; 完全折回 d=|L1−L2|=6 → β=0
+  const straight = solveIK(Math.sqrt(361 - 9), 3);               // d=19
+  const folded = solveIK(0, 6);                                  // d=6
   check('直腿时膝角 β=180°', Math.abs(straight.th2 - Math.PI) < 1e-6);
   check('完全折回时膝角 β=0°', Math.abs(folded.th2) < 1e-6);
 }

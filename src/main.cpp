@@ -5,15 +5,16 @@
  *
  * 已集成模式（每个都是原 test/ 里对应文件移植而来）：
  *   -DMODE_SERVO_SWEEP   单舵机摆动测试          （原 ServoSweepTest.cpp）
- *   -DMODE_LEG_SWEEP     单腿两关节摆动测试
+ *   -DMODE_LEG_SWEEP     单腿摆动测试（只往复动 leg0 的大腿舵机 30°~150°，小腿不动）
  *   -DMODE_SINGLE_LEG_GRAB 单腿不断抓地（行走/刨地循环）★新增
  *   -DMODE_TWO_LEGS      两腿顺序串联，跑一个周期  （原 TwoLegsTest.cpp）
  *   -DMODE_TWO_LEGS_CYCLE 两腿同步/反相无限循环   （原 TwoLegsCycleLoop.cpp）
  *   -DMODE_TRIPOD        完整三角步态（六足）     （原 TripodGaitTest.cpp）
  *   -DMODE_SERVO_TEST    通用舵机测试（扫描/同步/串口控制）★新增
  *   -DMODE_SINGLE_SERVO_TEST 平台单舵机测试（串口交互式，测任意 1 路）★新增
- *   -DMODE_SINGLE_LEG_TEST   单腿测试（串口交互式，循环/定位/调参）★新增
+ *   -DMODE_SINGLE_LEG_TEST   可切换多腿测试（legs 运行时选 1~6 条腿）★新增
  *   -DMODE_SIX_LEGS_SYNC     六腿同步测试（单腿测试动作扩展为 6 腿同步）★新增
+ *   -DMODE_GAIT_6DIR         六方向步态测试（SingleLegTest 全部功能 + 三角步态 + 6 个行走方向）★新增
  *
  *  ★ PlatformIO 用法：见 platformio.ini，改 build_flags 里的 -DMODE_XXX 即可。
  *    舵机测试的串口命令：
@@ -34,6 +35,8 @@
 // ================= 运行时模式选择 =================
 #if defined(MODE_SERVO_SWEEP)
     // ---- 模式1：单舵机扫描（原 ServoSweepTest）----
+    // 经 ServoManager 驱动 leg0 大腿（ch0）在 30°~150° 之间匀速往复，
+    // 每 500ms 换向；因此会叠加 Config.h 的零位偏移，并回传 @SERVO 遥测。
     #include "ServoManager.h"
     const int TARGET_LEG   = 0;
     const int TARGET_JOINT = ServoManager::FEMUR;
@@ -70,9 +73,10 @@
     }
 
 #elif defined(MODE_LEG_SWEEP)
-    // ---- 模式2：单腿两关节摆动测试 ----
-    // 不依赖 SingleLeg，直接驱动腿0的两个舵机在 30°~150° 对摆，
-    // 用于快速确认某条腿的舵机与电源是否到位。
+    // ---- 模式2：单腿摆动测试 ----
+    // 不依赖 SingleLeg，直接经 ServoManager 让 leg0 的**大腿舵机**在 30°~150° 之间
+    // 往复摆动（小腿舵机全程不动），用于快速确认该路舵机与电源是否到位。
+    // 想连小腿一起动请用 MODE_SINGLE_SERVO_TEST / MODE_SINGLE_LEG_TEST。
     #include "ServoManager.h"
     const unsigned long SWEEP_MS = 600;
     bool up = true;
@@ -124,6 +128,8 @@
 
 #elif defined(MODE_TWO_LEGS)
     // ---- 模式4：两腿顺序串联，跑一次（原 TwoLegsTest）----
+    // legA(0) 先跑完 ARC_EXTEND → LINE_RETRACT 两段，再轮到 legB(1) 跑同样两段；
+    // 两条腿全部跑完后进入 while(1) 停住（不循环）。
     #include "SingleLeg.h"
     SingleLeg legA(0), legB(1);
     const unsigned long PRIM_DURATION = 500;
@@ -165,6 +171,9 @@
 
 #elif defined(MODE_TWO_LEGS_CYCLE)
     // ---- 模式5：两腿同步/反相无限循环（原 TwoLegsCycleLoop）----
+    // legA(0)、legB(1) 各自无限循环 ARC_EXTEND → LINE_RETRACT 两段；
+    // PHASE_MODE 决定相位：PHASE_SYNC 两腿同步，PHASE_OPPOSITE（当前生效）
+    // 让 legB 从半步后的原语起步，即两腿反相（交替迈步）。
     #include "SingleLeg.h"
     SingleLeg legA(0), legB(1);
     const unsigned long PRIM_DURATION = 500;
@@ -207,9 +216,12 @@
 
 #elif defined(MODE_SERVO_TEST)
     // ---- 模式7：通用舵机测试（PCA9685 驱动，多通道）----
-    // 兼容 Arduino/PlatformIO。用串口命令控制：
+    // 自带一套最小的 PCA9685 驱动逻辑（自实现 svAngleToPulse/svWrite），
+    // **刻意不经过 ServoManager**：因此不吃 Config.h 的零位偏移、也不会回传 @SERVO 遥测，
+    // 适合裸测通道/接线。串口命令：
     //   sweep → 通道逐个扫描；all → 全部同步扫描；mode 3 → 串口精确控制
     //   串口控制模式下输入 "<通道> <角度>"（如 "0 90"）精确转到某角度
+    // 上电时 setup 里会先把 12 路全部写到 90°（中位）。
     #include <Wire.h>
     #include <Adafruit_PWMServoDriver.h>
     #include "Config.h"
@@ -306,11 +318,24 @@
     #include "../test/SingleServoTest.cpp"
 
 #elif defined(MODE_SINGLE_LEG_TEST)
-    // ---- 模式9：单腿测试（串口交互式）----
-    // 串口命令：help / cycle / one / home / goto <x> <y> / lift <cm> /
-    //           dur <ms> / pos / stop
+    // ---- 模式9：可切换多腿测试（串口交互式）----
+    // 串口命令：legs(运行时选择被测腿: all / 0 / 0 1 2 / 0-3) / each(逐腿巡检) /
+    //           cycle / one / home / goto <x> <y> / lift <cm> / dur <ms> /
+    //           0|1 <角度>(选中腿舵机直控) / pos / stop
+    // 选中 1 条腿 = 单腿测试；选中 2~6 条 = 严格同步一起动。
     // 完整说明见 test/SingleLegTest.cpp（自包含文件，此处直接引用）
     #include "../test/SingleLegTest.cpp"
+
+#elif defined(MODE_GAIT_6DIR)
+    // ---- 模式11：六方向步态测试（串口交互式）----
+    // = SingleLegTest 的全部功能（legs 选腿 / cycle / one / each / home / goto / lift / dur /
+    //   0|1 舵机直控 / pos / servo [watch|off] / stop）
+    //   + 三角步态（6 腿自动分两组交替支撑，时序严格 A,B,A,B…，修掉了 TripodGait 的 A,A,B 问题）
+    //   + 6 个行走方向（行程系数投影法 cᵢ = cos(φ−αᵢ)，任意 φ 走直线）
+    // 三角步态命令：tripod|tri [one|step|stop] / phase / stride <cm> / verify
+    // 方向命令：f fl bl b br fr（0/60/120/180/240/300°）/ dir <角度> / dirs / mirror
+    // 完整说明见 test/Gait6DirTest.cpp（自包含文件，此处直接引用）
+    #include "../test/Gait6DirTest.cpp"
 
 #elif defined(MODE_SIX_LEGS_SYNC)
     // ---- 模式10：六腿同步测试（串口交互式）----

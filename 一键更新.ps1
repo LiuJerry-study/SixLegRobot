@@ -1,17 +1,21 @@
 ﻿<#
 .SYNOPSIS
-    Git 一键提交并推送脚本（add → commit → push）
+    Git 一键提交并推送脚本（git add -A → git commit → 可选 git pull --rebase → git push -u origin HEAD）
 .DESCRIPTION
-    自动 add、commit 并 push 当前仓库的所有更改。
-    若未提供提交信息，则使用当前时间戳。
-    脚本以"自身所在位置"定位目标仓库：脚本放在哪个仓库里，就更新哪个仓库，
-    从任意目录运行均可。
+    自动 add、commit 并 push 当前仓库的所有更改：
+      git add -A → git commit -m <信息> →（-Pull 时）git pull --rebase → git push -u origin HEAD。
+    若未提供提交信息，则使用当前时间戳；提交信息以 - 开头会被拒绝（怕被当成命令行参数）。
+    脚本以"自身所在位置"定位目标仓库（git -C $PSScriptRoot rev-parse --show-toplevel）：
+    脚本放在哪个仓库里，就更新哪个仓库；但若当前所在目录属于另一个 Git 仓库，
+    脚本会拒绝执行（防误提交）。无 remote 时提交后直接报错退出，不会 push。
+    注意：全程使用 git add -A，所有未被 .gitignore 忽略的改动（含未跟踪的新文件）都会入库。
 .PARAMETER Message
     提交信息（可选，位置参数）
 .PARAMETER Pull
-    推送前先执行 git pull --rebase（开关）
+    推送前先执行 git pull --rebase（开关）：在本地 commit 完成后、push 之前执行；
+    变基失败会提示手动解决冲突并直接退出（不推送）。
 .PARAMETER Force
-    强制推送（开关，谨慎使用；使用更安全的 --force-with-lease）
+    强制推送（开关，谨慎使用；实际命令为 git push -u origin HEAD --force-with-lease）
 .PARAMETER Help
     显示帮助信息（可用 -h 简写）
 .EXAMPLE
@@ -82,7 +86,8 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# ---------- 定位目标仓库（以脚本所在位置为准，确定性行为） ----------
+# ---------- 定位目标仓库（以脚本所在位置 $PSScriptRoot 为准，确定性行为；
+#            脚本所在目录不在任何仓库内时报错退出） ----------
 $repoRoot = git -C $PSScriptRoot rev-parse --show-toplevel 2>$null
 if ($LASTEXITCODE -ne 0 -or -not $repoRoot) {
     Write-Host "❌ 脚本所在目录不在任何 Git 仓库中（未找到 .git）。" -ForegroundColor Red
@@ -90,6 +95,7 @@ if ($LASTEXITCODE -ne 0 -or -not $repoRoot) {
 }
 
 # 安全检查：若当前目录位于另一个 Git 仓库中，拒绝执行，防止误提交
+# （当前目录不在任何仓库时 git rev-parse 失败，这一项跳过、不阻拦）
 $cwdRoot = git rev-parse --show-toplevel 2>$null
 if ($LASTEXITCODE -eq 0 -and $cwdRoot) {
     if ((Resolve-Path $cwdRoot).Path -ine (Resolve-Path $repoRoot).Path) {
@@ -99,6 +105,7 @@ if ($LASTEXITCODE -eq 0 -and $cwdRoot) {
     }
 }
 
+# 切到目标仓库，之后所有 git 命令都作用于它；finally 里还原原目录
 Push-Location $repoRoot
 try {
     Write-Host "📍 目标仓库：$repoRoot" -ForegroundColor DarkGray
@@ -107,7 +114,7 @@ try {
         Write-Host "🌿 当前分支：$branch" -ForegroundColor DarkGray
     }
 
-    # ---------- 提交信息 ----------
+    # ---------- 提交信息（缺省用时间戳；以 - 开头的消息会被拒绝） ----------
     if ([string]::IsNullOrWhiteSpace($Message)) {
         $Message = "自动更新: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
     }
@@ -127,7 +134,7 @@ try {
         exit 0
     }
 
-    # ---------- 添加所有更改 ----------
+    # ---------- 添加所有更改（⚠ git add -A：未忽略的新增/修改/删除文件全部入库，先维护好 .gitignore） ----------
     Write-Host "➡️  添加所有更改（git add -A）..." -ForegroundColor Cyan
     git add -A
     if ($LASTEXITCODE -ne 0) {
@@ -145,7 +152,7 @@ try {
     $shortHash = git rev-parse --short HEAD
     Write-Host "✔ 已提交：$shortHash - $Message" -ForegroundColor DarkGray
 
-    # ---------- 检查远程仓库 ----------
+    # ---------- 检查远程仓库（没配 remote 就直接退出，不做 push） ----------
     if (-not (git remote)) {
         Write-Host "❌ 未配置远程仓库。请先执行：git remote add origin <仓库地址>" -ForegroundColor Red
         exit 1
@@ -165,7 +172,8 @@ try {
         }
     }
 
-    # ---------- 推送（首次推送自动设置上游） ----------
+    # ---------- 推送（git push -u origin HEAD：顺带把上游设为 origin/<当前分支>；
+    #            -Force 时换成 --force-with-lease，远程有他人新提交会被拒绝） ----------
     if ($Force) {
         Write-Host "⚠️  强制推送已启用（--force-with-lease，远程若有他人新提交会被拒绝）！" -ForegroundColor Yellow
         git push -u origin HEAD --force-with-lease

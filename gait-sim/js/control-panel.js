@@ -1,31 +1,25 @@
 /* ============================================================
- * control-panel.js — 真机遥控面板（Web Serial → ESP32）
+ * control-panel.js — 触地模式 · 真机遥控面板（Web Serial → ESP32）
  *
- * 使 gait-sim 可视化程序成为机器人的控制程序：
- *   1. 用 Chrome/Edge 的 Web Serial 直连 ESP32（COM 口, 115200）
- *      → 固件请烧 MODE_SIX_LEGS_SYNC（test/SixLegsSyncTest.cpp）
- *   2. 勾选"🎯 目标点遥控"后，在地面点击/拖拽目标点 →
- *      只取"目标点距机心的径向距离 r"，6 条腿足端同步落到以 r 为半径的
- *      目标环上（每条腿沿自己的方位角径向伸缩，大腿/小腿舵机转到对应角度）
- *      → 同时向固件发送  goto <x> <y>（x = -(r-hipRadius)，y = -drop）
- *   3. 快捷按钮：站立 / 循环行走 / 停止；动作时长滑块；手动命令；收发日志
- *
- * 运行要求（重要）：
- *   - 必须通过 http://localhost:8000 打开（或 https），file:// 双击打开不行；
- *     用 start-control.bat / python -m http.server 8000 启动即可；
- *   - 必须 Chrome 或 Edge（Web Serial API）；连接前先关闭 PlatformIO 串口监视器。
- *
- * 依赖：main.js 暴露的 window.SimCore（本文件轮询等待它就绪后自举）。
- * ============================================================ */
+ * 勾选"🎯 目标点遥控"后点击/拖拽地面: 只取目标点到机心的径向距离 r(限幅 [R_LO, R_HI]),
+ *   6 条腿足端同步落到半径 r 的目标环上, 同时发 goto <x> <y>
+ *   (x = −(r−hipRadius), y = −drop; 与固件 SingleLeg 足端坐标约定一致)。
+ * 另有: 站立/循环行走/停止/读状态、动作时长、手动命令、收发日志。
+ * 固件须为 MODE_SIX_LEGS_SYNC; 串口独占(连接前关掉串口监视器), 须 http://localhost + Chrome/Edge。
+ * 与悬空孪生互斥: 切到悬空时 main.js 调 window.RcPanel.disconnect()。
+ * @SERVO 遥测行由 rx() 丢弃, 不进本日志。依赖 main.js 暴露的 window.SimCore。
+ */
 (function () {
   'use strict';
 
   // ================= 状态 =================
   const S = {
     port: null, reader: null, writer: null, connected: false,
+    // ⚠ 死字段: manualOn 不写不读; targetR/drop 只写不读 (遥控开关状态看 SimCore.manual.on 与 #rcTargetChk)
     manualOn: false, targetR: 0, drop: 0,
     lastSentAt: 0, pendingSend: null,
-    drag: false, downX: 0, downY: 0
+    drag: false, downX: 0, downY: 0,
+    opening: false   // 正在建立连接的标志（防重复点击 / 重复 open）
   };
   const LOG_MAX = 220;
   let ui = null, markers = null;
@@ -174,7 +168,7 @@
     const group = new THREE.Group();
     group.visible = false;
 
-    // 目标环：单位圆 + 缩放 = 半径 r（在 XZ 平面）
+    // 目标环: 单位圆 + 缩放 = 半径 r (XZ 平面)
     const ringPts = [];
     for (let i = 0; i <= 96; i++) {
       const a = (i / 96) * Math.PI * 2;
@@ -209,7 +203,7 @@
     return { group, ring, dots, pin };
   }
 
-  // relX/relZ = 点击点相对机心的地面坐标；传 null 则只画环不画针
+  // relX/relZ = 点击点相对机心的地面坐标; 传 null 只画环不画针
   function updateMarkers(r, relX, relZ) {
     if (!markers) return;
     const C = window.SimCore.CONFIG;
@@ -264,7 +258,7 @@
     setTarget(r, hit.x - c.x, hit.z - c.z);
   }
 
-  // 设定全体足端目标环半径并发送 goto（节流）
+  // 设定全体足端目标环半径并发 goto (节流: ≥120ms 直发, 否则 130ms 后补发最后一条)
   function setTarget(r, relX, relZ) {
     const C = window.SimCore.CONFIG;
     const core = window.SimCore;
@@ -302,7 +296,7 @@
         send('home');
         log('→ home：真机回默认站立位');
         if (ui && ui.tgtCheck.checked) {
-          window.SimCore.setManual(true, C.R_LO);   // 环同步缩到站立足半径
+          window.SimCore.setManual(true, C.R_LO);   // 环同步缩到站立足半径（R_LO = 髋外 6.0cm, 对应固件站姿脚 (−6,−10)）
           updateMarkers(C.R_LO, null);
         }
         break;
@@ -355,7 +349,19 @@
 
   // ================= Web Serial =================
   function onConnectClick() {
-    if (S.connected) disconnect(); else connect();
+    if (S.connected) disconnect();
+    else if (!S.opening) connect();
+  }
+
+  // 彻底释放串口连接并等 close 完成, 防止对没关干净的端口再次 open 报 "already open"
+  async function releasePort() {
+    if (S.reader) { try { await S.reader.cancel(); } catch (e) { /* ignore */ } }
+    S.reader = null;
+    if (S.writer) { try { S.writer.releaseLock(); } catch (e) { /* ignore */ } S.writer = null; }
+    const p = S.port;
+    S.port = null;
+    if (p) { try { await p.close(); } catch (e) { /* ignore */ } }
+    S.connected = false;
   }
 
   async function connect() {
@@ -363,21 +369,50 @@
       log('! 浏览器不支持 Web Serial：请用 Chrome/Edge 通过 http://localhost:8000 打开本页');
       return;
     }
+    if (S.opening) return;
+    S.opening = true;
     try {
+      if (S.port || S.reader || S.writer || S.connected) {   // 残留旧连接 → 先彻底关掉
+        await releasePort();
+        setConnUI(false);
+      }
       const port = await navigator.serial.requestPort();
-      await port.open({ baudRate: 115200 });
+      try {
+        await port.open({ baudRate: 115200 });
+      } catch (e) {
+        if (/already open|already in use|busy/i.test(e && e.message)) {
+          log('! ' + e.message);
+          log('  → 该串口仍被占用：请关掉其它连着它的网页标签/旧页面后刷新本页再连；');
+          log('    并确认 PlatformIO / Arduino 串口监视器已关闭。');
+        } else {
+          log('! 连接失败：' + e.message);
+          log('  → 请先关闭 PlatformIO 串口监视器或其他占用串口的程序，再重试');
+        }
+        try { await port.close(); } catch (e2) { /* ignore */ }
+        return;
+      }
       S.port = port;
       S.connected = true;
-      S.writer = port.writable.getWriter();
+      try {
+        S.writer = port.writable.getWriter();
+      } catch (e) {
+        log('! 获取写入通道失败：' + e.message);
+        S.connected = false; S.port = null;
+        try { await port.close(); } catch (e2) { /* ignore */ }
+        return;
+      }
       setConnUI(true);
       log('✓ 已连接串口 115200（固件须为 MODE_SIX_LEGS_SYNC）');
       send('dur ' + ui.durIn.value);       // 同步动作时长
       readLoop(port);
     } catch (e) {
-      log('! 连接失败：' + e.message);
-      if (/denied|busy|in use|占用|另一个|another/i.test(e.message)) {
-        log('  → 请先关闭 PlatformIO 串口监视器或其他占用串口的程序，再重试');
+      if (e && e.message && /no port|cancel/i.test(e.message)) {
+        log('已取消选择串口');
+      } else {
+        log('! 连接失败：' + (e && e.message ? e.message : e));
       }
+    } finally {
+      S.opening = false;
     }
   }
 
@@ -388,17 +423,14 @@
     ui.btnConnect.textContent = on ? '🔌 断开串口' : '🔌 连接串口';
   }
 
-  function disconnect() {
-    if (!S.connected) return;
+  async function disconnect() {
+    if (!S.connected && !S.port && !S.reader && !S.writer) return;
+    const wasConn = S.connected;
     S.connected = false;
     try { if (S.reader) S.reader.cancel(); } catch (e) { /* ignore */ }
-    try { if (S.writer) { S.writer.releaseLock(); S.writer = null; } } catch (e) { /* ignore */ }
-    setTimeout(function () {   // 等 readLoop 退出后再关端口
-      try { if (S.port) S.port.close(); } catch (e) { /* ignore */ }
-      S.port = null; S.reader = null;
-    }, 80);
+    releasePort();
     setConnUI(false);
-    log('串口已断开');
+    if (wasConn) log('串口已断开');
   }
 
   async function readLoop(port) {
@@ -423,10 +455,14 @@
       if (S.connected) log('! 串口读取中断：' + e.message);
     } finally {
       try { if (reader) reader.releaseLock(); } catch (e) { /* ignore */ }
-      S.reader = null;
+      if (S.reader === reader) S.reader = null;
+      if (S.port === port) {               // 没被 disconnect 抢先接管时，由本循环负责关端口
+        S.port = null;
+        try { await port.close(); } catch (e) { /* ignore */ }
+      }
+      S.writer = null;
       if (S.connected) {
         S.connected = false;
-        S.port = null; S.writer = null;
         setConnUI(false);
         log('串口已断开');
       }
@@ -468,7 +504,10 @@
   function log(msg) {
     push('[' + new Date().toLocaleTimeString('zh-CN', { hour12: false }) + '] ' + msg);
   }
-  function rx(line) { push(line); }
+  function rx(line) {
+    if (/^@SERVO/.test(line)) return;   // @SERVO 为孪生遥测行（遥测现已通用回传），不进触地遥控日志
+    push(line);
+  }
   function tx(cmd) {
     if (ui) ui.lastCmd.textContent = '▶ 最近发送: ' + cmd;
     push('→ ' + cmd);
@@ -481,6 +520,12 @@
       ui.logBox.scrollTop = ui.logBox.scrollHeight;
     }
   }
+
+  // 暴露给 main.js：切到悬空模式时关闭本面板(触地·真机遥控)的串口连接
+  window.RcPanel = {
+    disconnect: disconnect,
+    isConnected: function () { return S.connected; }
+  };
 
   boot();
 })();

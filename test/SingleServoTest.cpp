@@ -10,7 +10,8 @@
  *
  *        help                → 打印命令帮助
  *        map                 → 打印 通道 ↔ (腿, 关节) 对照表
- *        center              → 全部 12 个舵机回到 90°（安全位）
+ *        center              → 全部 12 路写逻辑角 90°（"安全位"；实际角 = 90° + 偏移，
+ *                              偏移表当前全 0 ⇒ 就是 90°）
  *        sweep <ch>          → 通道 ch 在 30°~150° 来回摆动（如 sweep 3）
  *        sweep leg <l> <j>   → (腿l, 关节j) 来回摆动（如 sweep leg 0 1）
  *        stop                → 停止摆动，保持当前角度
@@ -21,18 +22,46 @@
  *     ch0=leg0大腿  ch1=leg0小腿  ch2=leg1大腿  ch3=leg1小腿 ...
  *     ch10=leg5大腿 ch11=leg5小腿
  *
+ *   角度说明：命令与 sweep 里的角度是「逻辑角」；ServoManager 写入时自动叠加
+ *   Config.h 的零位偏移 ANGLE_OFFSET（实际到达角 = 逻辑角 + 偏移，超 0~180 限幅）。
+ *   ⚠ 该表当前【整表为 0，待按实物重新标定】（旧值按错误的大腿映射标定，已作废）
+ *     ⇒ 现在实际到达角 = 逻辑角；重新标定后差值才会体现。
+ *   map 会打印每通道的偏移，center / 单通道写入 / sweep 会打印实际到达角，
+ *   便于在实物上核对 ANGLE_OFFSET 是否填得正确（角度偏了改对应值的正负）。
+ *
+ * ── 数字孪生遥测（供 gait-sim「悬空模式」镜像）────────────
+ *   本测试【不自带】遥测代码：所有写舵机统一走 ServoManager::write()，
+ *   而该函数已在固件层内置节流回传一行机器可读遥测：
+ *
+ *        @SERVO:<ch>:<角度>      例： @SERVO:0:67.4（默认站姿的大腿角；偏移全 0 即逻辑角）
+ *
+ *   ch = PCA9685 通道号；角度 = 叠加零位偏移并限幅(0~180)后的最终舵机角
+ *   （偏移表当前整表为 0 ⇒ 就是逻辑角）。
+ *   因此烧录单舵机/单腿/六腿同步等【任意经 ServoManager 写舵机的模式】，
+ *   gait-sim「悬空模式」都能解析 @SERVO 并 1:1 镜像 12 路舵机（见 src/ServoManager.cpp）。
+ *
  * ── 安全建议 ──────────────────────────────────────────
- *   - 上电时 ServoManager::begin() 会让全部 12 个舵机回 90°，务必先把
- *     机器人架起来（腿悬空）或确认周围无障碍，避免舵机堵转/扫到东西；
+ *   - 上电时 ServoManager::begin() 只初始化驱动板、不会驱动任何舵机，
+ *     机器人上电瞬间保持不动；只有你发命令指定的那一路舵机会动。
+ *     若希望手动转动舵机臂，可先断开舵机电源或卸下舵机臂再操作；
  *   - 舵机电源用独立 5V，并与 ESP32 共地（接线见 Config.h 注释）；
  *   - 首次测试建议把舵机臂取下，先确认转向与角度范围。
  *
- * 本文件为自包含版，也可在 Arduino IDE 里与以下源文件一起编译：
+ * 本文件【不是 PlatformIO 单元测试】：src/main.cpp 里有
+ *   #elif defined(MODE_SINGLE_SERVO_TEST) … #include "../test/SingleServoTest.cpp"
+ * 即它被直接包含进 main.cpp 所在的同一个编译单元（把 platformio.ini 的 build_flags
+ * 改成 -DMODE_SINGLE_SERVO_TEST 即生效 —— 本文件里的 PI 也就是 Arduino.h 的宏）。
+ * 也可在 Arduino IDE 里与以下源文件一起编译：
  *   include/Config.h、include/ServoManager.h、src/ServoManager.cpp
+ *
+ * ✅ 编译状态（2026-09-10 实测）：pio run 通过。此前 src/ServoManager.cpp 里的 `const double PI` 与
+ *   Arduino.h 的 PI 宏同名相撞（error: expected unqualified-id before numeric constant）曾让整个工程
+ *   编译不过，该行已删除；别再往 include 了 <Arduino.h> 的文件作用域写 `const double PI`。
  */
 
 #include <Arduino.h>
 #include "ServoManager.h"
+#include "Config.h"
 
 // ================= 测试参数 =================
 const float SWEEP_MIN = 30.0f;         // 摆动下限（度）
@@ -52,23 +81,34 @@ const char* jointName(int j) {
     return (j == ServoManager::FEMUR) ? "FEMUR(大腿)" : "TIBIA(小腿)";
 }
 
+// ================= 零位偏移小工具 =================
+// 命令角度是逻辑角；实际到达角 = 逻辑角 + Config.h ANGLE_OFFSET，再限幅 0~180，
+// 与 ServoManager::write 内部规则完全一致（仅供打印显示，写入仍走 write()）。
+float servoFinalAngle(int l, int j, float deg) {
+    return constrain(deg + robot::ANGLE_OFFSET[l][j], 0.0f, 180.0f);
+}
+
 void printHelp() {
     Serial.println("--- 单舵机测试命令 ---");
     Serial.println("  help                : 本帮助");
-    Serial.println("  map                 : 通道与(腿,关节)对照表");
+    Serial.println("  map                 : 通道与(腿,关节)对照表(含零位偏移)");
     Serial.println("  center              : 全部 12 个舵机回 90°");
     Serial.println("  sweep <ch>          : 通道 ch 来回摆动 (ch=0~11)");
     Serial.println("  sweep leg <l> <j>   : (腿 l, 关节 j) 来回摆动");
     Serial.println("  stop                : 停止摆动，保持当前角度");
     Serial.println("  <ch> <angle>        : 通道 ch 转到角度 (0~180)");
     Serial.println("  leg <l> <j> <angle> : (腿 l, 关节 j) 转到角度");
+    Serial.println("  (命令角度=逻辑角；实际到达角=角度+Config偏移，写入/center/sweep 会打印)");
 }
 
 void printMap() {
-    Serial.println("通道 → (腿, 关节)：");
+    Serial.println("通道 → (腿, 关节, 零位偏移°)  实际到达角 = 命令角 + 偏移：");
     for (int ch = 0; ch < 12; ch++) {
-        Serial.printf("  ch%2d → leg%d %s\n", ch, chToLeg(ch), jointName(chToJoint(ch)));
+        int l = chToLeg(ch), j = chToJoint(ch);
+        Serial.printf("  ch%2d → leg%d %s  偏移 %+6.1f°\n",
+                      ch, l, jointName(j), robot::ANGLE_OFFSET[l][j]);
     }
+    Serial.println("  (偏移取自 Config.h ANGLE_OFFSET；center/写入/sweep 会打印实际到达角)");
 }
 
 void stopSweep();
@@ -80,7 +120,15 @@ void centerAll() {
             ServoManager::write(l, (ServoManager::Joint)j, 90.0f);
         }
     }
-    Serial.println("全部舵机 → 90°");
+    Serial.println("全部舵机 → 90°（逻辑角；带零位偏移的通道实际角如下）");
+    for (int ch = 0; ch < 12; ch++) {
+        int l = chToLeg(ch), j = chToJoint(ch);
+        if (robot::ANGLE_OFFSET[l][j] != 0.0f) {
+            Serial.printf("    ch%2d (leg%d %s): 90° + %+.1f° → 实际 %.1f°\n",
+                          ch, l, jointName(j), robot::ANGLE_OFFSET[l][j],
+                          servoFinalAngle(l, j, 90.0f));
+        }
+    }
 }
 
 void startSweep(int ch) {
@@ -91,14 +139,20 @@ void startSweep(int ch) {
     sweepAngle = SWEEP_MIN;
     ServoManager::write(chToLeg(ch), (ServoManager::Joint)chToJoint(ch), sweepAngle);
     sweepStartMs = millis();
-    Serial.printf("sweep ch%d (leg%d %s): %d°~%d°, %lu ms/程\n",
-                  ch, chToLeg(ch), jointName(chToJoint(ch)),
-                  (int)SWEEP_MIN, (int)SWEEP_MAX, (unsigned long)SWEEP_MS);
+    int l = chToLeg(ch), j = chToJoint(ch);
+    Serial.printf("sweep ch%d (leg%d %s): 逻辑 %d°~%d° + 偏移 %+.1f° → 实际 %.1f°~%.1f°, %lu ms/程\n",
+                  ch, l, jointName(j),
+                  (int)SWEEP_MIN, (int)SWEEP_MAX, robot::ANGLE_OFFSET[l][j],
+                  servoFinalAngle(l, j, SWEEP_MIN), servoFinalAngle(l, j, SWEEP_MAX),
+                  (unsigned long)SWEEP_MS);
 }
 
 void stopSweep() {
     if (sweepChannel >= 0) {
-        Serial.printf("stop sweep ch%d @ %.1f°\n", sweepChannel, sweepAngle);
+        int ch = sweepChannel;
+        Serial.printf("stop sweep ch%d @ 逻辑 %.1f° (实际 %.1f°)\n",
+                      ch, sweepAngle,
+                      servoFinalAngle(chToLeg(ch), chToJoint(ch), sweepAngle));
         sweepChannel = -1;   // PCA9685 持续输出最后脉冲，舵机保持不动
     }
 }
@@ -107,9 +161,11 @@ void setAngleByChannel(int ch, float deg) {
     if (ch < 0 || ch > 11) { Serial.println("! 通道范围 0~11"); return; }
     stopSweep();
     deg = constrain(deg, 0.0f, 180.0f);
-    ServoManager::write(chToLeg(ch), (ServoManager::Joint)chToJoint(ch), deg);
-    Serial.printf("ch%d (leg%d %s) -> %.1f°\n",
-                  ch, chToLeg(ch), jointName(chToJoint(ch)), deg);
+    int l = chToLeg(ch), j = chToJoint(ch);
+    ServoManager::write(l, (ServoManager::Joint)j, deg);
+    Serial.printf("ch%d (leg%d %s): %.1f° + 偏移 %+.1f° → 实际 %.1f°\n",
+                  ch, l, jointName(j), deg,
+                  robot::ANGLE_OFFSET[l][j], servoFinalAngle(l, j, deg));
 }
 
 void setAngleByLeg(int l, int j, float deg) {
@@ -181,7 +237,7 @@ void setup() {
     Serial.begin(115200);
     delay(200);
 
-    ServoManager::begin();            // 初始化 PCA9685，全部通道回 90°
+    ServoManager::begin();            // 初始化 PCA9685（不驱动任何舵机，上电不动）
     Serial.println("=== 平台单舵机测试 (PCA9685, 12路) ===");
     printMap();
     printHelp();

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>六足机器人步态模拟器 · 径向2舵机腿 · Rapier物理引擎</title>
+<title>六足机器人 · 悬空数字孪生 / 触地步态模拟 · 径向2舵机腿</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,9 +11,17 @@
 <div id="bootError"></div>
 
 <div id="panel">
-  <h1>六足机器人步态模拟器</h1>
-  <p class="sub">径向 2 舵机腿 · 蜘蛛式折腿（大腿8.0 / 小腿13.0cm）· 无转向关节 · 全向平移 · 摩擦动力学</p>
+  <h1>六足机器人 · 数字孪生与步态模拟</h1>
+  <p class="sub">径向 2 舵机腿 · 蜘蛛式折腿（大腿6.5 / 小腿12.5cm）· 无转向关节</p>
 
+  <!-- 面板/分区显隐由 main.js setAppMode() 统一切换(.hidden / style.display);
+       #twinPanel 由 twin-panel.js 运行时插到 #groundOnly 前, #rcSection 由 control-panel.js 插到 #notes 前 -->
+  <div id="modeSwitch">
+    <button id="modeHangBtn" class="modeBtn modeBtnHang">🪝 悬空模式 · 舵机孪生 <span class="modeTag">有孪生</span></button>
+    <button id="modeGroundBtn" class="modeBtn modeBtnGround active">🐾 触地模式 · 步态模拟 <span class="modeTag">无孪生</span></button>
+  </div>
+
+  <div id="groundOnly">
   <section>
     <h2>步态模式</h2>
     <label><input type="radio" name="mode" value="tripod" checked> 三角步态 <span class="dim">快速直线（3腿交替支撑）</span></label>
@@ -37,20 +45,21 @@
     <div class="row"><span>速度</span><input id="speed" type="range" min="0.05" max="1" step="0.01" value="0.6"></div>
     <div class="row"><span>步幅</span><input id="stride" type="range" min="0.4" max="1.2" step="0.01" value="0.8"></div>
     <div class="row"><span>抬腿高度</span><input id="lift" type="range" min="0.5" max="6" step="0.1" value="3.5"></div>
-    <div class="row"><span>机身高度</span><input id="bh" type="range" min="5.5" max="11" step="0.05" value="7.8"></div>
+    <div class="row"><span>机身高度</span><input id="bh" type="range" min="5.5" max="12.5" step="0.05" value="11.0"></div>
     <div class="row"><span>摩擦 μ</span><input id="mu" type="range" min="0.05" max="1.5" step="0.05" value="1.0"><span id="muVal" style="width:34px;text-align:right;color:#7fd0ff">1.00</span></div>
     <div class="dim">摩擦系数越小地面越滑：足底打滑、机身越走越慢（真实库仑摩擦模型）</div>
   </section>
+  </div><!-- /groundOnly -->
 
-  <section>
+  <section id="viewSection">
     <h2>视角</h2>
     <button id="camDefault">默认</button><button id="camTop">俯视</button>
     <button id="camSide">侧视</button><button id="camFront">前视</button>
-    <label><input id="follow" type="checkbox"> 跟随机器人</label>
+    <label id="followRow"><input id="follow" type="checkbox"> 跟随机器人</label>
     <label><input id="autorotate" type="checkbox"> 自动旋转</label>
   </section>
 
-  <section>
+  <section id="dispSection">
     <h2>显示</h2>
     <label><input id="showTrails" type="checkbox" checked> 足端轨迹</label>
     <label><input id="showBody" type="checkbox" checked> 机身轨迹</label>
@@ -58,22 +67,26 @@
     <label><input id="showAz" type="checkbox" checked> 方位参考环</label>
   </section>
 
-  <section>
+  <section id="playSection">
     <button id="playPause">⏸ 暂停</button>
     <button id="reset">↺ 重置位置</button>
   </section>
 
   <details id="notes" open>
-    <summary>运动学与动力学要点（先读）</summary>
+    <summary>模式说明与要点（先读）</summary>
     <ul>
-      <li><b>蜘蛛式折腿</b>（大腿 8cm + 小腿 13cm）：髋关节在机身边缘（下方）；大腿从髋向外上拱，小腿从膝盖向下折回着地，膝盖是最高/最外点，侧看呈 "Λ" 拱——脚始终着地、膝离地 ≥ 9cm，不会"跪着走"。</li>
-      <li><b>足端范围与固件一致</b>：髋外 5.0cm（默认站立足，小腿竖直、脚在膝正下方）到髋外 14.9cm（伸出足 2/3 分点）；默认站立时足端在髋下方 6.755cm（机身高度 ≈ 7.8cm）。</li>
-      <li><b>支撑相前腿收（拉地）、后腿伸（蹬地）</b>；摆动相相反。行程系数 c<sub>i</sub> = cos(φ−α<sub>i</sub>)，c&gt;0 收 / c&lt;0 伸。</li>
-      <li>每条腿只有径向推力，且作用线都过机心 → <b>机头朝向（偏航）无法改变</b>。“转向”= 全向平移（斜走）。</li>
-      <li><b>摩擦动力学（机身不再匀速）</b>：支撑腿以弹簧-阻尼驱动足端扫掠，推力被库仑静摩擦 μ·N 封顶；超过极限时足底<b>沿径向滑移</b>（红箭头 / HUD 红字），机身在惯性下加速、减速、滑行。拖动“摩擦 μ”即可看到打滑。</li>
-      <li>≥3 腿同时支撑时理想模型运动学锁死，本模型通过<b>足底微滑移</b>自然化解——与真实六足一致（绿色箭头即每腿实际推力）。</li>
-      <li>对腿步态是唯一“干净平移”（无滑移、无偏航耦合），其余 4 腿悬停。</li>
-      <li>角度与固件同构（余弦定理）：膝角 β=acos((L1²+L2²−d²)/(2L1L2))（π=直腿）；髋角 α=atan2(−drop,a)+γ（相对水平径向向外，向上为正）。</li>
+      <li><b>两种模式</b>：<b>悬空</b>＝真机吊在架上，网页经 Web Serial <b>独占</b>串口发命令，并 1:1 镜像固件回传的 12 路 <code>@SERVO</code> 遥测（未收到遥测时显示双 90° 占位，非站姿；连接前先关串口监视器）；<b>触地</b>＝纯步态物理模拟 + 真机遥控。</li>
+      <li><b>蜘蛛式折腿</b>（大腿 6.5 + 小腿 12.5cm）：髋在机身边缘下方，大腿向外上拱、小腿向下折回着地，膝盖是最高/最外点，侧看呈 "Λ" 拱。</li>
+      <li><b>足端范围</b>：髋外 6.0cm（默认站立足，小腿竖直、脚在膝正下方）～12.8cm（伸出足 2/3 分点），默认机身高度 ≈11.0cm。</li>
+      <li><b>支撑相前腿收（拉地）、后腿伸（蹬地）</b>，摆动相相反：行程系数 c<sub>i</sub>=cos(φ−α<sub>i</sub>)，c&gt;0 收 / c&lt;0 伸。</li>
+      <li>每条腿只有径向推力且作用线都过机心 → <b>机头朝向无法改变</b>，"转向"＝全向平移（斜走）。</li>
+      <li><b>摩擦动力学（机身不匀速）</b>：支撑腿以弹簧-阻尼驱动足端扫掠，推力被静摩擦 μ·N 封顶，超限即沿径向滑移（红箭头 / HUD 红字），机身随之加速、减速、打滑；≥3 腿支撑时的运动学锁死靠足底微滑移化解。</li>
+      <li>对腿步态是唯一"干净平移"（无滑移、无偏航耦合），其余 4 腿悬停；角度与固件同构（余弦定理）：膝角 β=acos((L1²+L2²−d²)/(2L1L2))，髋角 α=atan2(−drop,a)+γ。</li>
+      <!-- 与固件角度口径的换算（2026-09-10）：本页髋角 α（相对水平径向向外轴、向上为正）= 90° − 固件 ag2
+           （固件 ag2 为"外倾为正"口径，默认站姿 +67.38° → α = +22.62°）；本页膝内角 β = 固件 ag1（站姿 +67.38°）。
+           固件舵机映射（实物实测）：大腿舵机角 S = ag2、小腿舵机角 K = 180 − ag1，ANGLE_OFFSET 整表已清零
+           → 默认站姿 S = 67.38°、K = 112.62°；悬空孪生直接按 α = 90° − S 摆姿态，与本页 IK 口径一致。
+           下面 HUD 表头的「髋°/膝°」显示的就是仿真 α/β，不是固件的 ag2/ag1；换算说明与 gait-sim/README.md、robot.js 一致。 -->
     </ul>
   </details>
 </div>
@@ -87,7 +100,9 @@
 </div>
 
 <script>
-/* 依次加载库（本地优先，失败回退 CDN），再加载业务脚本 */
+/* 依次加载（本地优先，失败回退 CDN）：three → OrbitControls → robot → gaits → physics → main（暴露 SimCore）
+   最后是 control-panel / twin-panel 两个面板（各自轮询 SimCore 就绪后自举；control-panel 管触地真机遥控，
+   twin-panel 管悬空舵机孪生）。任一 js/ 脚本加载失败都会在 #bootError 里显示"启动失败" */
 (function () {
   function load(url) {
     return new Promise(function (res, rej) {
@@ -106,7 +121,8 @@
     ['js/gaits.js', null],
     ['js/physics.js', null],
     ['js/main.js', null],
-    ['js/control-panel.js', null]
+    ['js/control-panel.js', null],
+    ['js/twin-panel.js', null]
   ];
   (function next(i) {
     if (i >= chain.length) return;

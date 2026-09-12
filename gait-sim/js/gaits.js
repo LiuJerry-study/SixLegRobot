@@ -1,13 +1,7 @@
-/* ============================================================
- * gaits.js — 步态规划器（三角 / 波纹 / 对腿）
- *
- * 核心规则: 行程系数 c_i = cos(φ − α_i)
- *   c > 0 → 支撑相"收"(拉地, 足端向机心移动)
- *   c < 0 → 支撑相"伸"(蹬地, 足端向外推)
- * 足端扫掠采用轻度 S 曲线 (起止不归零、中段最快) —— 驱动速度随相位变化,
- * 机身速度由 main.js 的摩擦动力学决定 (不再匀速)。
- * 全局挂载: window.GaitPlanner = { createGaitPlanner }
- * ============================================================ */
+/* gaits.js — 步态规划器（三角 / 波纹 / 对腿）
+ * 行程系数 c_i = cos(φ − α_i): c>0 支撑相"收"(拉地), c<0 "伸"(蹬地);
+ * 足端扫掠用轻度 S 曲线, 机身速度由 main.js 的摩擦动力学决定。
+ * 全局挂载: window.GaitPlanner */
 (function (g) {
   'use strict';
 
@@ -20,7 +14,7 @@
     const R_MID = (R_LO + R_HI) / 2;
     const n = 6;
 
-    // 每腿行程系数
+    // 每腿行程系数 c_i = cos(φ − α_i)
     function coeffs(phiDeg) {
       const c = new Array(n);
       for (let i = 0; i < n; i++) {
@@ -30,8 +24,7 @@
       return c;
     }
 
-    // 由系数决定支撑相足端扫掠的起止径向位置
-    // c>0(收): 从外扫到内; c<0(伸): 从内扫到外; |c| 决定扫掠幅度
+    // 支撑相足端扫掠的起止径向位置: c>0 从外扫到内(收), c<0 从内扫到外(伸), |c| 决定幅度
     function sweepTargets(c, sweepMag) {
       const from = new Array(n), to = new Array(n);
       for (let i = 0; i < n; i++) {
@@ -45,17 +38,13 @@
 
     const lerp = (a, b, u) => a + (b - a) * u;
     const mod1 = x => ((x % 1) + 1) % 1; // JS 的 % 保留符号, 转成 [0,1)
-    // 缓动相位: 轻度 S 曲线 (斜率 0.5~1.5 倍均速) —— 起止不归零,
-    // 支撑扫掠速度随相位波动 → 机身真实加减速, 但不会在换腿瞬间刹停
+    // 缓动相位: 轻度 S 曲线 (斜率 0.5~1.5 倍均速), 换腿瞬间不刹停
     const ease = u => u - 0.5 * Math.sin(2 * Math.PI * u) / (2 * Math.PI);
     const easeDot = u => 1 - 0.5 * Math.cos(2 * Math.PI * u);   // d(ease)/du
 
-    /* compute(mode, phiDeg, t, opts) -> {
-     *   targets: [{r, y, rdot, state:'stance'|'swing'|'hold', coeff}],  // 6 腿
-     *     rdot = 足端指令径向速度 (cm/s, 供摩擦动力学使用, 解析解, 无数值微分噪声)
-     *   dir: {x,z} | null,   // 净推力方向 (仅用于测试/参考; 实际运动由摩擦动力学产生)
-     *   vScale: 平动速度系数 (保留, 不再被 main.js 使用)
-     * } */
+    /* compute(mode, phiDeg, t, opts) -> { targets[6]: {r, y, rdot, state, coeff}, dir, vScale }
+     * rdot = 足端指令径向速度 (cm/s, 解析解), 供摩擦动力学使用
+     * ⚠ main.js 额外传的 bodyHeight / 返回的 vScale 均无人使用 */
     function compute(mode, phiDeg, t, opts) {
       const { sweepMag, cycleT, lift, pairIndex } = opts;
       const c = coeffs(phiDeg);
@@ -132,7 +121,7 @@
         }
       }
 
-      // 速度系数: 仅保留作参考 (旧"净推力匀速"模型使用; 现机身速度由摩擦动力学决定)
+      // 速度系数: 旧"净推力匀速"模型遗留, 现无人使用
       const sf = mode === 'ripple' ? (1 - 1 / 6) : 0.5;
       const vScale = (sweepMag / (sf * cycleT)) * (mode === 'tripod' ? 2 / 3 : mode === 'ripple' ? 0.5 : 0.5);
 

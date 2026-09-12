@@ -2,7 +2,7 @@
 #  Git 忽略规则
 # ============================================================
 
-# ---- PlatformIO 构建产物（重要：一键更新.ps1 用 git add -A，会把这些提交上去）----
+# ---- PlatformIO 构建产物（.pio/ 体积很大；一键更新.ps1 用 git add -A，不忽略就会被提交）----
 .pio/
 .vscode/.browse.c_cpp.db*
 .vscode/.browse.VC.db*
@@ -15,7 +15,9 @@
 .cache/
 compile_commands.json
 
-# ---- Python（角度计算/ 工具虚拟环境）----
+# ---- Python 字节码缓存（角度计算/ 里的 tk 工具，不是虚拟环境）----
+# ⚠ 注意：角度计算/__pycache__/robot_leg.cpython-312.pyc 已被历史提交跟踪，
+#   忽略规则对已跟踪文件无效，git add -A 仍会把它带上（需 git rm --cached 才脱离跟踪）
 __pycache__/
 *.py[cod]
 

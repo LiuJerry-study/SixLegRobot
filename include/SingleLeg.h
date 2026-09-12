@@ -1,8 +1,11 @@
 /* 单腿控制类：足端位置管理 + 轨迹插值（摆动相 / 支撑相）。
  *
  * 硬件：每条腿 2 个舵机（大腿 + 小腿），两自由度在同一竖直平面内，无髋节旋转。
- * 方案 A：不直接操作舵机——引脚、零位偏移、限幅全部由 ServoManager 负责，
+ * 方案 A：不直接操作舵机——通道、零位偏移、限幅全部由 ServoManager 负责，
  * 本类只做「足端坐标 → 关节角 → 写入」的运动学逻辑。
+ *
+ * 坐标系：原点 = 髋关节（大腿根部舵机），x+ 指向机体中心（内侧）、x− 为外侧，
+ *         y+ 竖直向上 → 着地方向是 y 为负；默认站立足端 (−6, −10)。
  */
 
 #ifndef SINGLE_LEG_H
@@ -40,7 +43,7 @@ public:
     // 默认站立足端：小腿竖直并与内圆（半径 |LENA-LENB|）相切，取负侧切线
     static void defaultStandingFoot(double& x, double& y);
 
-    // 伸出足端：默认站立高度上，站立脚与达外圆同侧交点所成线段的 2/3 分点
+    // 伸出足端：默认站立高度上，站立脚与外圆（半径 LENA+LENB）同侧交点所成线段的 2/3 分点
     static void extendedFoot(double& x, double& y);
 
     // 启动一段轨迹：起点 → 终点，按模式走弧线或贴地，持续 durationMs
@@ -70,7 +73,8 @@ private:
     LegKinematics kin;   // 腿长取自 Config.h（LENA 大腿 / LENB 小腿）
 
     float currentX, currentY;   // 当前足端坐标
-    float standHeight;          // 站立高度
+    float standHeight;          // 站立高度（cm，由 init() 记录；当前实现里只存不用，
+                                // 初始姿势实际由 defaultStandingFoot() 的恒定足端 (−6,−10) 决定）
 
     // 插值运动状态
     float startX, startY;
@@ -82,7 +86,10 @@ private:
     unsigned long duration;
     bool isMovingFlag;
 
-    // 弧度 → 舵机坐标系 → ServoManager 写入（偏移与限幅在其内部）
+    // 足端坐标 → 关节角(弧度) → 舵机角(度) → ServoManager 写入（偏移与限幅在其内部）。
+    // 入参单位是弧度（LegKinematics::ik() 的返回值），本函数乘 180/π 转度（只换算这一次）。
+    // 映射：大腿 = ag2（ag2 为"外倾为正"口径；实物实测 0°=竖直向上、180°=竖直向下）、小腿 = 180 − ag1
+    //   → 默认站姿 67.38° / 112.62°，详见 src/SingleLeg.cpp 实现处的口径说明。
     void writeServosFromRad(float thighRad, float kneeRad);
 };
 

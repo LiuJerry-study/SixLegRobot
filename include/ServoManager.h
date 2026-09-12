@@ -30,11 +30,18 @@ public:
         TIBIA = 1    // 小腿（膝盖）
     };
 
-    static void begin();   // 初始化 PCA9685 并复位全部 12 通道；幂等，可重复调用
+    static void begin();   // 初始化 PCA9685（50Hz），不驱动任何舵机（上电不动）；幂等，可重复调用
 
     // 写入关节角度（度）：angleDeg + 偏移 → 限幅 0~180 → 计算脉冲 → 写 PCA9685。
     // 偏移符号按实际安装校准：角度偏了就翻转 Config.h 里对应值的正负。
+    // 每次真正驱动某路舵机都会【节流回传一行数字孪生遥测 @SERVO:<ch>:<实际到达角>】
+    // （ch = PCA9685 输出通道；节流 ≥0.5° 且 ≥50ms），供 gait-sim「悬空·舵机孪生」等
+    // 上位机 1:1 镜像 —— 任何经 write() 写舵机的模式（单舵机/单腿/六腿同步/步态…）通用。
+    // 注：舵机无位置反馈，遥测是"固件下发的指令角"，不代表真机一定到位。
     static void write(int leg, Joint joint, float angleDeg);
+
+    // 数字孪生遥测开关（默认开）。不需要遥测（如嫌串口输出刷屏）时可在 setup 里关闭。
+    static void setTelemetry(bool on);
 
     // 便捷写法（可选）
     static void writeFemur(int leg, float deg) { write(leg, FEMUR, deg); }

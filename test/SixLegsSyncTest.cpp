@@ -33,10 +33,40 @@
  *   下一步（以最后完成的那条腿为准），保证全程严格同步、不互相拉扯。
  *
  * ── 安全建议 ──────────────────────────────────────────
- *   - 上电时 ServoManager::begin() 会让全部 12 个舵机回 90°，务必架起机器人；
+ *   - 上电时 ServoManager::begin() 不驱动舵机，setup 会逐条腿 init()
+ *     （每次只动该腿 2 个舵机、间隔 100ms），务必架起机器人；
  *   - 12 个舵机同时动作电流很大（峰值可达数安培），舵机电源务必用独立
  *     大电流 5V（如 5A 以上开关电源/电池+UBEC），且与 ESP32 共地；
  *   - 先跑"单舵机/单腿"测试确认每路都正常，再跑本测试，便于定位问题。
+ *
+ *   6 条腿的坐标系各自独立（原点 = 各自髋关节），本文件不给任何相位/位姿差，
+ *   所以"6 腿同步"= 6 条腿做完全相同的动作，脚都停在同一个坐标 (−6, −10)。
+ *
+ * ── 这个文件是怎么被编译的 ─────────────────────────────
+ *   本文件【不是 PlatformIO 单元测试】：src/main.cpp 里有
+ *       #elif defined(MODE_SIX_LEGS_SYNC) … #include "../test/SixLegsSyncTest.cpp"
+ *   即它被直接包含进 main.cpp 所在的同一个编译单元（把 platformio.ini 的 build_flags
+ *   改成 -DMODE_SIX_LEGS_SYNC 即生效），全局变量/函数与 main.cpp 共享同一个 TU。
+ *
+ * ── 数字孪生遥测 ──────────────────────────────────────
+ *   本文件不自带遥测：写舵机统一走 ServoManager::write()，运行时会节流回传
+ *       @SERVO:<ch>:<最终角>      例： @SERVO:0:67.4（默认站姿的大腿角）
+ *   （最终角 = 逻辑角 + 零位偏移，限幅 0~180；零位偏移表当前【整表为 0，待按实物重新标定】
+ *     ⇒ 最终角就是逻辑角；角度变化 ≥0.5° 且每通道 ≥50ms 一条，默认开，
+ *     可用 ServoManager::setTelemetry(false) 关）—— gait-sim「悬空模式」用。
+ *
+ * ⚠ 注意（本文件只改注释、不动代码）：
+ *   - STAND_HEIGHT 传给 init() 后只是被记录（当前实现未参与运算），默认站姿由几何决定
+ *     = (−6, −10)（小腿竖直、与内圆 |LENA−LENB| = 6cm 相切），改这个常量不改变站姿；
+ *   - 角度口径（2026-09-10 定为"外倾为正"）：ik() 返回弧度，站姿 ag1 = ag2 = +67.38°；
+ *     舵机映射【2026-09 实物实测】：大腿 = ag2（舵机 0° = 大腿竖直向上、180° = 竖直向下，
+ *     中间扫过"朝外"那半边）→ 站姿 67.38°；小腿 = 180 − ag1 → 112.62°；
+ *     Config.h::ANGLE_OFFSET 整表已清零 ⇒ 这两值就是最终写入角（都在 0~180° 内）。
+ *   - 6 条腿同时动作电流很大，务必先架空机器人再发命令。
+ *
+ * ✅ 编译状态（2026-09-10 实测）：pio run 通过。此前 src/ServoManager.cpp 里的 `const double PI` 与
+ *   Arduino.h 的 PI 宏同名相撞（error: expected unqualified-id before numeric constant）曾让整个工程
+ *   编译不过，该行已删除；别再往 include 了 <Arduino.h> 的文件作用域写 `const double PI`。
  *
  * 本文件为自包含版，也可在 Arduino IDE 里与以下源文件一起编译：
  *   include/Config.h、include/LegKinematics.h、include/ServoManager.h、
@@ -56,7 +86,7 @@ SingleLeg legs[6] = {
 };
 
 // ================= 测试参数 =================
-const float STAND_HEIGHT = 10.0f;             // 站立高度（cm）
+const float STAND_HEIGHT = 10.0f;             // 站立高度（cm）；⚠ 只被 init() 记录，站姿恒为 (−6,−10)
 const unsigned long DEFAULT_DURATION_MS = 300; // 单个动作默认时长（越小越快，太快舵机会跟不上）
 const float DEFAULT_ARC_LIFT = 3.0f;           // 弧线默认抬腿高度（cm）
 
@@ -265,7 +295,8 @@ void setup() {
     delay(200);
 
     for (int i = 0; i < 6; i++) {
-        legs[i].init(STAND_HEIGHT);      // 初始化（内部会初始化 PCA9685）并回站立位
+        legs[i].init(STAND_HEIGHT);      // 初始化（内部幂等调 ServoManager::begin()），
+                                         // 并把该腿两路舵机立刻写到默认站姿（每条腿各 delay(100)）
         legs[i].setArcLift(DEFAULT_ARC_LIFT);
     }
 

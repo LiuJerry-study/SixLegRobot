@@ -13,6 +13,7 @@
 
 #include <Arduino.h>
 #include "LegKinematics.h"
+#include "RobotModel.h"
 
 // 轨迹模式
 enum TrajectoryMode {
@@ -39,6 +40,7 @@ public:
 
     // 立即移动到指定足端坐标（瞬间到达，用于初始复位 / 调试）
     void setFootPositionImmediate(float x, float y);
+    void trackFootPosition(float x, float y) { currentX = x; currentY = y; isMovingFlag = false; }
 
     // 默认站立足端：小腿竖直并与内圆（半径 |LENA-LENB|）相切，取负侧切线
     static void defaultStandingFoot(double& x, double& y);
@@ -73,8 +75,7 @@ private:
     LegKinematics kin;   // 腿长取自 Config.h（LENA 大腿 / LENB 小腿）
 
     float currentX, currentY;   // 当前足端坐标
-    float standHeight;          // 站立高度（cm，由 init() 记录；当前实现里只存不用，
-                                // 初始姿势实际由 defaultStandingFoot() 的恒定足端 (−6,−10) 决定）
+    float standHeight = -robot::STAND_Y;
 
     // 插值运动状态
     float startX, startY;

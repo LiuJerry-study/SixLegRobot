@@ -8,7 +8,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #14161d;
   font-size: 13px; z-index: 99; display: none; }
 #bootError:empty { display: none; }
 
-#panel { position: fixed; top: 10px; right: 10px; width: 310px;
+#panel { position: fixed; top: 10px; right: 10px; width: 384px;
   max-height: calc(100vh - 20px); overflow-y: auto;
   background: rgba(22, 25, 36, 0.94); border: 1px solid #333a52; border-radius: 10px;
   padding: 12px 14px; z-index: 10; box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
@@ -21,6 +21,8 @@ label { display: block; font-size: 12.5px; padding: 2px 0; cursor: pointer; }
 input[type=range] { width: 108px; vertical-align: middle; }
 .row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin: 3px 0; }
 .row span:first-child { width: 62px; color: #9aa3ba; }
+/* 面板加宽后：行内滑条自动吃满剩余宽度（原先写死 108px, 右半边全是空当） */
+.row input[type=range] { flex: 1; min-width: 0; width: auto; }
 #phiVal { width: 34px; text-align: right; color: #7fd0ff; }
 .quick { margin: 2px 0 6px; }
 button { background: #2c3247; color: #dfe3ee; border: 1px solid #3a4158;
@@ -61,20 +63,30 @@ button.rcPrimary:hover { background: #2783ce; }
 #rcCmdIn, #twinCmdIn { flex: 1; min-width: 0; background: #10131c; color: #dfe3ee;
   border: 1px solid #3a4158; border-radius: 6px; padding: 4px 8px; font-size: 12px; }
 .rcMeta { font-size: 11px; color: #9aa3ba; margin: 4px 0; line-height: 1.6; }
-#rcLastCmd { color: #7fd0ff; word-break: break-all; }
+
+/* 🕹 圆形移动键（真机遥控面板主控件；canvas 由 control-panel.js 运行时建, 这里只管外壳）
+   拖 = 走 · 松 = 停；正上方 = leg0 正前方, 逆时针 60° 一档 */
+.joyWrap { display: flex; justify-content: center; margin: 6px 0 2px; }
+.joyPad { display: block; touch-action: none; user-select: none; -webkit-user-select: none;
+  cursor: grab; border-radius: 50%; }
+.joyPad.active { cursor: grabbing; }
+#rcJoyStat { font-size: 11.5px; color: #ffd9a3; }
+#rcJoyFw { font-family: Consolas, "Courier New", monospace; }
 #rcLog { width: 100%; height: 130px; background: #10131c; color: #c8d2e4;
   border: 1px solid #333a52; border-radius: 6px; padding: 6px;
   font: 11px/1.55 Consolas, "Courier New", monospace; white-space: pre-wrap;
-  word-break: break-all; overflow-y: auto; margin: 6px 0 2px; }
+  overflow-wrap: anywhere; overflow-y: auto; margin: 6px 0 2px; }   /* anywhere: 长命令照样换行, 但优先按词断行 */
 
-/* 两模式开关（main.js setAppMode() 切 .active / .hidden） */
-#modeSwitch { display: flex; gap: 6px; margin: 2px 0 10px; }
-.modeBtn { flex: 1; padding: 6px 4px; font-size: 12px; line-height: 1.5;
+/* 三模式开关（main.js setAppMode() 切 .active / 面板显隐）：悬空 / 触地 / 真机遥控 并列一行 */
+#modeSwitch { display: flex; gap: 5px; margin: 2px 0 10px; }
+.modeBtn { flex: 1; min-width: 0; padding: 6px 3px; font-size: 12px; line-height: 1.45;
   border-radius: 8px; text-align: center; }
 .modeBtnHang { background: #243b55; border-color: #3a6a99; }
 .modeBtnGround { background: #243b2e; border-color: #3a9949; }
+.modeBtnRc { background: #4a3a1e; border-color: #997a3a; }
 .modeBtn.active.modeBtnHang { background: #1f6fb2; border-color: #4fc3f7; }
 .modeBtn.active.modeBtnGround { background: #1f7a3d; border-color: #6fd08c; }
+.modeBtn.active.modeBtnRc { background: #b8721f; border-color: #ffb347; }
 .modeTag { display: block; font-size: 10px; opacity: 0.75; font-weight: normal; }
 .hidden { display: none !important; }   /* 面板/分区显隐统一用它 */
 
@@ -99,11 +111,37 @@ button.rcPrimary:hover { background: #2783ce; }
 /* 孪生控制台: 固件模式 #twinFwSel / 命令参考 .cmdRefList / 折叠区 .twinDetails */
 #twinFwSel { flex: 1; min-width: 0; background: #10131c; color: #dfe3ee;
   border: 1px solid #3a4158; border-radius: 6px; padding: 3px 6px; font-size: 11.5px; }
-#twinPanel .twinDetails { margin-top: 5px; border-top: 1px solid #2a2f42; padding-top: 6px; }
-#twinPanel .twinDetails summary { cursor: pointer; color: #7fd0ff; font-size: 11.5px; }
+#twinPanel .twinDetails, #masterPanel .twinDetails { margin-top: 5px; border-top: 1px solid #2a2f42; padding-top: 6px; }
+#twinPanel .twinDetails summary, #masterPanel .twinDetails summary { cursor: pointer; color: #7fd0ff; font-size: 11.5px; }
 #twinPanel .cmdRefBody { margin-top: 4px; }
 #twinPanel .cmdRefList { list-style: none; margin: 5px 0 2px; padding: 0; }
 #twinPanel .cmdRefList li { display: flex; gap: 8px; align-items: baseline;
   font-size: 11px; line-height: 1.65; color: #b6bed4; }
 #twinPanel .cmdRefList code { flex: none; min-width: 104px; color: #9fd8ff; }
 #twinPanel .cmdRefList span { flex: 1; min-width: 0; }
+
+/* ============================================================
+ * 主控台面板（master-panel.js，配套 -DMODE_MASTER_CONTROL）
+ * 方向键 / 选腿按钮 / 12 路舵机滑条；复用按钮与 .row/.rcBtnRow/.twVal 等通用样式
+ * ============================================================ */
+#masterPanel h2 { margin-top: 2px; }
+#masterPanel .dim { line-height: 1.55; }
+#masterPanel button:disabled, #masterPanel input:disabled, #masterPanel select:disabled {
+  opacity: 0.45; cursor: not-allowed; }
+/* 6 个方向：3 列网格 */
+.mpGrid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 4px 0; }
+.mpDirBtn { padding: 6px 2px; font-size: 11.5px; }
+/* 选腿按钮（.active = 选中） */
+.mpLegBtn { padding: 3px 8px; font-size: 11.5px; }
+/* 小输入框 / 下拉框 */
+.mpNum { width: 58px; background: #10131c; color: #dfe3ee; border: 1px solid #3a4158;
+  border-radius: 6px; padding: 3px 6px; font-size: 12px; }
+.mpSel { background: #10131c; color: #dfe3ee; border: 1px solid #3a4158;
+  border-radius: 6px; padding: 3px 5px; font-size: 11.5px; }
+/* 12 路舵机滑条 */
+.mpChWrap { margin: 5px 0 2px; border-top: 1px solid #2a2f42; padding-top: 5px; }
+.mpChRow { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 11px; }
+.mpChLabel { width: 92px; color: #c6d2e8; flex: none; }
+.mpChLabel.tib { color: #ffd9a3; }
+/* 覆盖全局 input[type=range]{width:108px}：滑条占满剩余宽度 */
+#masterPanel .mpChRow input[type=range] { width: auto; flex: 1; min-width: 0; }

@@ -1,22 +1,4 @@
-/* ============================================================
- * twin-panel.js — 悬空模式 · 数字孪生控制台（串口控制 + 镜像）
- *
- * 遥测通用: @SERVO:<ch>:<角度>（ch = leg*2 + joint = Config.h SERVO_PINS[leg][joint],
- *   0=大腿 1=小腿; 角度 = 逻辑角 + ANGLE_OFFSET 再限幅 0~180 的最终舵机角）由固件
- *   ServoManager::write() 节流回传(变化 ≥0.5° 且每通道 ≥50ms), 任意经它写舵机的模式都能镜像。
- *   ⚠ 逻辑角口径（2026-09-10「外倾为正」方案 B + 大腿映射按实物实测改版）: 大腿 = ag2、小腿 = 180 − ag1
- *     （ag1/ag2 为固件 ik() 返回的弧度换算成的度; 站姿 ag1 = ag2 = +67.38° → 大腿 67.38° / 小腿 112.62°）;
- *     Config.h::ANGLE_OFFSET 整表已清零 → 最终写入角 = 逻辑角, 站姿直接就是 67.4° / 112.6°, 不会顶 180° 端点。
- *   ⚠ MODE_SERVO_TEST 直写 PCA9685、不走 ServoManager → 选它时 12 路镜像不动。
- *
- * 控制台顶部可选/自动识别固件模式(连接后发 help), 快捷键、命令提示、参考表随之联动。
- * 默认双 90° 只是未收到遥测时的显示占位(不代表站姿); 固件 center 也发 90°(安全位, 偏移已清零)。
- * 3D 映射见 robot.js::applyServoAngles(): α = 90°−S = 90°−ag2、knee = −K = ag1 − 180, 与固件口径自洽
- * （回传角即最终写入角, 是"发什么显示什么"的 1:1 镜像, 不反向补偿）。
- * 串口独占: 连接前关掉串口监视器; 须 http://localhost + Chrome/Edge。
- * 与触地遥控互斥: 切到触地时 main.js 调 window.TwinPanel.disconnect()。
- * 依赖 main.js 暴露的 window.SimCore（轮询等待就绪后自举）。
- */
+/* 悬空控制台：Web Serial、版本化命令帧和旧版 @SERVO。 */
 (function () {
   'use strict';
 
@@ -31,6 +13,10 @@
   const LOG_MAX = 180;
   let ui = null;
   let built = false;
+  let leaseTimer = null;
+  let closing = null;
+  let compatible = false;
+  let frameMismatch = false;
 
   // ================= 固件模式档案 =================
   // 与固件各 MODE_* 的命令集一一对应（见 src/main.cpp 与 test/*.cpp）
@@ -44,8 +30,47 @@
         ['说明', '命令集随固件模式而不同: 先选对模式，按钮和提示才对得上']
       ]
     },
+    master: {   // MODE_MASTER_CONTROL   test/MasterControl.cpp
+      // 三块能力合一的固件：方向行走 + 选腿控制 + 单舵机控制。
+      // 配套还有 master-panel.js 的「🕹 主控台」面板（按钮 + 12 路滑条），选本模式时自动显示。
+      label: '六足主控台 · MODE_MASTER_CONTROL',
+      keys: ['六足主控台', 'MODE_MASTER_CONTROL'],
+      quick: [
+        ['前 f', 'f'],
+        ['左前 fl', 'fl'],
+        ['左后 bl', 'bl'],
+        ['后 b', 'b'],
+        ['右后 br', 'br'],
+        ['右前 fr', 'fr'],
+        ['连走 walk', 'walk'],
+        ['走一拍 step', 'step'],
+        ['停 stop', 'stop'],
+        ['回站立 home', 'home'],
+        ['状态 state', 'state'],
+        ['通道表 map', 'map']
+      ],
+      placeholder: '如 f / walk 4 / legs 0 1 3 / cycle / sv 0 0 90 / ch 3 90 / goto -8 -10 / dur 500',
+      ref: [
+        ['f fl bl b br fr', '6 个方向行走 0/60/120/180/240/300°（跑动中发 = 停→回站姿→按新方向起步）'],
+        ['dir <角度> / dirs', '任意角度吸附到最近 60° 档 / 打印方向表'],
+        ['walk [n] / step', '按当前方向连续走 / 只走 n 拍 / 只走一拍'],
+        ['phase / mirror', '相位表·拍数 / 腿序镜像（实物走反了用）'],
+        ['legs all|none|<n...>|<a-b>', '选择下面这些命令作用在哪几条腿上（legs 0 1 3 / legs 0-3）'],
+        ['cycle / one / each', '选中腿连续走 / 只走一个周期 / 逐腿巡检'],
+        ['home / goto <x> <y>', '选中腿回站立位 / 足端到绝对坐标 (cm，原点=髋关节)'],
+        ['lift <cm> / dur <ms>', '抬腿高度（默认 3.0）/ 动作与每拍时长（默认 600）'],
+        ['sv <leg> <joint> <角度>', '单条腿的单个舵机：joint 0/f=大腿、1/t=小腿，如 sv 0 0 90'],
+        ['ch <通道> <角度>', '按 PCA9685 通道直控（ch0~11 = leg×2+joint），如 ch 3 90'],
+        ['lsv / asv', '一条腿两个舵机一起发 / 选中腿的同一关节一起发'],
+        ['center', '12 路全部回逻辑角 90°（安全位，不是站姿 67.4/112.6）'],
+        ['pos / map / state / verify', '足端坐标 / 12 路对照表 / 全局状态 / 方向自检'],
+        ['stop', '停一切（步态/循环/直控）并平滑回站立位'],
+        ['注', '主控台的完整命令帧用于 3D 姿态回放；' +
+               '选本模式时页面会出现「🕹 主控台」面板，方向/选腿/12 路舵机滑条都是现成按钮']
+      ]
+    },
     single: {   // MODE_SINGLE_SERVO_TEST  test/SingleServoTest.cpp
-      // ⚠ ref 里"回 90°"指命令逻辑角; ANGLE_OFFSET 整表已清零 → 实际到达角就是 90°(安全位, 非站姿), 发 map 可查
+      // “回 90°”指逻辑角，发 map 查逐路补偿与最终角。
       label: '单舵机测试 · MODE_SINGLE_SERVO_TEST',
       keys: ['平台单舵机测试', '单舵机测试命令'],
       quick: [
@@ -109,7 +134,7 @@
         ['dur <ms>', '动作时长（默认 300，越小越快）'],
         ['0 <角度>', '6 条大腿(FEMUR)舵机同步转到角度 (0~180)'],
         ['1 <角度>', '6 条小腿(TIBIA)舵机同步转到角度 (0~180)'],
-        ['注', '0/1 直写的是最终舵机角(偏移已清零); 默认站姿 = 大腿 67.4° / 小腿 112.6°(发 home 让固件自己算)'],
+        ['注', '0/1 接收逻辑角。发 home 计算站姿，逐路叠加零位偏移'],
         ['pos', '打印 6 腿足端坐标/状态'],
         ['stop', '停止循环，回站立位']
       ]
@@ -174,7 +199,7 @@
     fwRow.appendChild(mk('span', null, '固件模式'));
     const fwSel = document.createElement('select');
     fwSel.id = 'twinFwSel';
-    ['auto', 'single', 'leg', 'sync', 'servoTest'].forEach(function (k) {
+    ['auto', 'master', 'single', 'leg', 'sync', 'servoTest'].forEach(function (k) {
       const o = document.createElement('option');
       o.value = k;
       o.textContent = FW[k].label;
@@ -241,6 +266,7 @@
     demoLbl.appendChild(mk('span', null, '离线扫动演示（不连真机，预览每路镜像方向）'));
     actRow.appendChild(demoLbl);
     sec.appendChild(actRow);
+    window.ReplayPanel.create(sec, window.SimCore.twin);
 
     // ---- 日志 ----
     const logRow = mk('div', 'rcBtnRow');
@@ -269,11 +295,11 @@
       ui.chWrap.innerHTML = '';
       ui.rows = [];
       const T = window.SimCore.twin;
-      for (let c = 0; c < 12; c++) {
+      for (const [c, id] of MotionFrame.channels) {
         const row = document.createElement('div');
         row.className = 'twRow';
         const lb = document.createElement('span');
-        lb.className = 'twLabel' + (c % 2 === 1 ? ' tib' : '');
+        lb.className = 'twLabel' + (id.joint === 1 ? ' tib' : '');
         lb.textContent = T.labelOf(c);
         const bar = document.createElement('div');
         bar.className = 'twBar';
@@ -284,7 +310,7 @@
         val.className = 'twVal';
         row.appendChild(lb); row.appendChild(bar); row.appendChild(val);
         ui.chWrap.appendChild(row);
-        ui.rows.push({ lb, fill, val });
+        ui.rows.push({ channel: c, lb, fill, val });
       }
     }
     buildRows();
@@ -294,6 +320,7 @@
     fwSel.addEventListener('change', function () {
       S.fw = fwSel.value;
       setFw(S.fw);
+      if (S.fw === 'master' && S.connected) send('snapshot');
       log('固件模式：' + FW[S.fw].label);
       // auto 模式下重连/当前已连接 → 再探测一次
       if (S.fw === 'auto') S.probed = false;
@@ -366,6 +393,9 @@
 
     // 命令输入占位
     ui.cmdIn.placeholder = f.placeholder || '手动输入命令后回车';
+
+    // 通知主控面板（master-panel.js）：固件模式变了 → 决定「🕹 主控台」是否显示
+    if (window.MasterPanel && typeof window.MasterPanel.onFw === 'function') window.MasterPanel.onFw(k);
   }
 
   // 悬空时显示本面板, 触地时隐藏
@@ -380,14 +410,15 @@
   function refreshTable() {
     if (!ui || !ui.rows) return;
     const T = window.SimCore.twin;
-    for (let c = 0; c < 12; c++) {
+    for (const row of ui.rows) {
+      const c = row.channel;
       const target = T.targetOf(c);       // 最近目标（真机遥测）
       const shown = T.currentOf(c);       // 平滑后的显示值
-      const row = ui.rows[c];
       const deg = (target !== null && shown !== null) ? shown : null;
       const pct = deg === null ? 0 : Math.max(0, Math.min(100, deg / 180 * 100));
       row.fill.style.width = pct.toFixed(1) + '%';
-      row.val.textContent = deg === null ? '—' : deg.toFixed(1) + '°';
+      const command = T.frame()?.outputs[c];
+      row.val.textContent = deg === null ? '待同步' : deg.toFixed(1) + '°' + (command?.limited ? ' 限幅' : '');
     }
   }
 
@@ -413,13 +444,18 @@
 
   // 彻底释放串口(reader/writer/port 全释放并等 close 完成): port 没 close 时再次 open 会报 "already open"
   async function releasePort() {
-    if (S.reader) { try { await S.reader.cancel(); } catch (e) { /* ignore */ } }
-    S.reader = null;
-    if (S.writer) { try { S.writer.releaseLock(); } catch (e) { /* ignore */ } S.writer = null; }
-    const p = S.port;
-    S.port = null;
-    if (p) { try { await p.close(); } catch (e) { /* ignore */ } }
+    const { port, reader, writer } = S;
     S.connected = false;
+    S.reader = S.writer = S.port = null;
+    if (reader) {
+      try { await reader.cancel(); reader.releaseLock(); } catch (error) { /* already released */ }
+    }
+    if (writer) {
+      try { await writer.ready; writer.releaseLock(); } catch (error) { /* already closed */ }
+    }
+    if (port) {
+      try { await port.close(); } catch (error) { /* already disconnected */ }
+    }
   }
 
   async function connect() {
@@ -437,6 +473,7 @@
         if (ui) setConnUI(false);
       }
 
+      if (closing) await closing;
       const port = await navigator.serial.requestPort();
       try {
         await port.open({ baudRate: 115200 });
@@ -457,6 +494,9 @@
 
       S.port = port;
       S.connected = true;
+      frameMismatch = compatible = false;
+      S.probed = false;
+      S.rxCount = 0;
       try {
         S.writer = port.writable.getWriter();
       } catch (e) {
@@ -469,10 +509,13 @@
       setConnUI(true);
       if (ui && ui.demoChk) { ui.demoChk.checked = false; ui.demoChk.disabled = true; }
       window.SimCore.twin.setDemo(false);
+      window.ReplayPanel.connection(true);
+      if (window.MasterPanel) window.MasterPanel.resetTelemetry();
       log('✓ 已连接：网页独占串口');
       readLoop(port);
       // auto 模式 → 发 help 探测固件，让命令集与真机对得上
       if (S.fw === 'auto' && !S.probed) probeFirmware();
+      else if (S.fw === 'master') send('snapshot');
     } catch (e) {
       if (e && e.message && /no port|cancel/i.test(e.message)) {
         log('已取消选择串口');
@@ -493,14 +536,24 @@
   }
 
   async function disconnect() {
-    if (!S.connected && !S.port && !S.reader && !S.writer) return;
-    const wasConn = S.connected;
-    S.connected = false;                       // 先置假：读循环 finally 不再重复打日志
-    try { if (S.reader) S.reader.cancel(); } catch (e) { /* ignore */ }
-    releasePort();                             // 异步收尾（readLoop finally 也会兜底关 port）
-    setConnUI(false);
-    if (wasConn) log('串口已断开');
-    if (ui) refreshStat();
+    if (closing) return closing;
+    if (!S.connected && !S.port) return;
+    closing = (async () => {
+      if (leaseTimer !== null) await send('stop');
+      if (compatible) await send('stream off');
+      clearLease();
+      await releasePort();
+      setConnUI(false);
+      window.ReplayPanel.connection(false);
+      window.SimCore.twin.resetVisual();
+      if (window.MasterPanel) window.MasterPanel.resetTelemetry();
+    })();
+    try { await closing; } finally { closing = null; }
+  }
+
+  function clearLease() {
+    if (leaseTimer !== null) clearInterval(leaseTimer);
+    leaseTimer = null;
   }
 
   async function readLoop(port) {
@@ -526,14 +579,13 @@
     } finally {
       try { if (reader) reader.releaseLock(); } catch (e) { /* ignore */ }
       if (S.reader === reader) S.reader = null;
-      if (S.port === port) {                   // 若没有被 disconnect 抢先接管，就由本循环负责关掉端口
-        S.port = null;
-        try { await port.close(); } catch (e) { /* ignore */ }
-      }
-      S.writer = null;
-      if (S.connected) {
-        S.connected = false;
+      if (S.port === port && !closing) {
+        clearLease();
+        await releasePort();
         setConnUI(false);
+        window.ReplayPanel.connection(false);
+        window.SimCore.twin.resetVisual();
+        if (window.MasterPanel) window.MasterPanel.resetTelemetry();
         log('串口已断开');
       }
     }
@@ -546,10 +598,17 @@
       log('! 未连接串口：请先点“🔌 连接串口”');
       return false;
     }
+    const walking = { f: 0, fl: 60, bl: 120, b: 180, br: 240, fr: 300 };
+    const match = /^(f|fl|bl|b|br|fr|walk|go|tri|tripod)$/i.exec(cmd);
+    if (compatible && match) cmd = 'drive' + (match[1].toLowerCase() in walking ? ' ' + walking[match[1].toLowerCase()] : '');
+    if (/^(stop|halt|home|step|walk\s+.*|cycle|one|each|legs\s+.*|sv|ch|lsv|asv|center)\b/i.test(cmd)) clearLease();
+    if (compatible && /^drive\b/i.test(cmd) && leaseTimer === null) {
+      leaseTimer = setInterval(() => { if (S.connected && !document.hidden) send('keepalive'); }, 250);
+    }
     try {
       await S.writer.write(new TextEncoder().encode(cmd + '\n'));
       S.txCount++;
-      tx(cmd);
+      if (cmd !== 'keepalive') tx(cmd);
       return true;
     } catch (e) {
       log('! 发送失败：' + e.message);
@@ -559,17 +618,39 @@
 
   // ================= 行解析 =================
   function rx(line) {
-    // 孪生遥测: @SERVO:<ch>:<角度>（分隔符 ':' 或空格都认, ch 只取 0~11, 角度=叠加零位偏移后的最终角）
-    // 越界(ch>11)/非数值的 @SERVO 行不镜像, 会落到函数末尾进日志
-    const m = /^@SERVO[:\s]+(\d{1,2})[:\s]+(\d+(?:\.\d+)?)/.exec(line);
+    if (line.startsWith('@FRAME ')) {
+      try {
+        const frame = MotionFrame.parse(line);
+        if (!frame) return;
+        S.rxCount++;
+        window.SimCore.twin.setFrame(frame);
+        window.ReplayPanel.live(line, frame);
+        if (window.MasterPanel) window.MasterPanel.onFrameData(frame);
+      } catch (error) {
+        if (!frameMismatch) log('! ' + error.message);
+        frameMismatch = true;
+      }
+      return;
+    }
+    const m = /^@SERVO[:\\s]+(\\d{1,2})[:\\s]+(\\d+(?:\\.\\d+)?)$/.exec(line);
     if (m) {
-      const ch = parseInt(m[1], 10);
-      const deg = parseFloat(m[2]);
-      if (ch >= 0 && ch <= 11 && isFinite(deg)) {
+      const ch = Number(m[1]), deg = Number(m[2]);
+      if (MotionFrame.channels.has(ch) && deg >= 0 && deg <= 180) {
         S.rxCount++;
         window.SimCore.twin.setChannel(ch, deg);
-        return;                       // 遥测不回显到日志（防刷屏）
+        if (window.MasterPanel) window.MasterPanel.onServo(ch, deg);
       }
+      return;
+    }
+    // 主控台状态行: @STATE dir=.. sqo=.. walk=.. cont=.. steps=.. sel=.. raw=.. dur=.. lift=..
+    // （MODE_MASTER_CONTROL 每条命令后回传；转发给主控面板同步按钮/选腿/参数，同样不回显防刷屏）
+    if (line.startsWith('@STATE')) {
+      compatible = /\\blease=\\d+/.test(line);
+      if (/ stage=hold(?: |$)/.test(line)) clearLease();
+      if (window.MasterPanel && typeof window.MasterPanel.onState === 'function') {
+        window.MasterPanel.onState(line.slice(6));
+      }
+      return;
     }
     // auto 模式下按回显文本识别固件模式
     if (S.connected && S.fw === 'auto') detectFirmware(line);
@@ -586,11 +667,12 @@
 
   function detectFirmware(line) {
     if (!ui || S.fw !== 'auto') return;
-    for (const k of ['single', 'leg', 'sync', 'servoTest']) {
+    for (const k of ['master', 'single', 'leg', 'sync', 'servoTest']) {
       const f = FW[k];
       if ((f.keys || []).some(function (key) { return line.indexOf(key) >= 0; })) {
         S.fw = k;
         setFw(k);
+        if (k === 'master') send('snapshot');
         log('✓ 识别到固件：' + FW[k].label + '（快捷按钮/命令参考已切换）');
         return;
       }

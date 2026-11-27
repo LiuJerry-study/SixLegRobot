@@ -6,6 +6,8 @@
  * 运行: node js/test-gait.js  (经 globalThis 取 Robot / GaitPlanner)
  * ============================================================ */
 'use strict';
+require('./robot-model.js');
+require('./motion-frame.js');
 require('./robot.js');
 require('./gaits.js');
 

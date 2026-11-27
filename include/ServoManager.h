@@ -9,7 +9,7 @@
  * 单例风格：全部静态方法，无需创建对象；SingleLeg/Gait/主程序都不直接碰舵机驱动。
  *
  * 接线：PCA9685.SDA→ESP32.GPIO21、PCA9685.SCL→ESP32.GPIO22，
- *       PCA9685 VCC→5V、GND 共地，舵机电源推荐用独立 5V（见 Config.h 注释）。
+ *       逻辑供电与 I²C 电平匹配，舵机电源独立供电并共地（见 Config.h）。
  *
  * 使用：setup 里无需单独调 begin()，SingleLeg::init() 内部会自动调用（幂等）。
  *      写入示例：ServoManager::write(legId, ServoManager::FEMUR, 90.0f);
@@ -21,6 +21,7 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 #include "Config.h"
+#include "WalkMotion.h"
 
 class ServoManager {
 public:
@@ -42,6 +43,8 @@ public:
 
     // 数字孪生遥测开关（默认开）。不需要遥测（如嫌串口输出刷屏）时可在 setup 里关闭。
     static void setTelemetry(bool on);
+    static const motion::JointCommand* lastCommand(int channel);
+    static bool takeWriteFailure();
 
     // 便捷写法（可选）
     static void writeFemur(int leg, float deg) { write(leg, FEMUR, deg); }

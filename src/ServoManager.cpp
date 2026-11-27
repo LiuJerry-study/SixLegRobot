@@ -26,6 +26,9 @@ namespace {
     bool telemetryOn = true;                 // 默认开；可用 ServoManager::setTelemetry(false) 关
     float lastEchoDeg[12] = { 0 };           // 最近一次回传的最终角（用于 ≥0.5° 变化判断）
     unsigned long lastEchoMs[12] = { 0 };    // 最近一次回传时刻（用于 ≥50ms 节流；0=尚未回传）
+    motion::JointCommand commands[robot::CHANNEL_COUNT] = {};
+    bool known[robot::CHANNEL_COUNT] = {};
+    bool writeFailed = false;
 }
 
 // 初始化 PCA9685（50Hz）；幂等。
@@ -53,7 +56,19 @@ void ServoManager::setTelemetry(bool on) {
     telemetryOn = on;
 }
 
+const motion::JointCommand* ServoManager::lastCommand(int channel) {
+    if (channel < 0 || channel >= robot::CHANNEL_COUNT || !known[channel]) return nullptr;
+    return &commands[channel];
+}
+
+bool ServoManager::takeWriteFailure() {
+    const bool failed = writeFailed;
+    writeFailed = false;
+    return failed;
+}
+
 void ServoManager::write(int leg, Joint joint, float angleDeg) {
+    if (leg < 0 || leg >= robot::LEG_COUNT || joint < FEMUR || joint > TIBIA || !isfinite(angleDeg)) return;
     // 防御：未初始化时写入会静默失败，打一次警告
     if (!initialized_) {
         static bool warned = false;
@@ -64,18 +79,25 @@ void ServoManager::write(int leg, Joint joint, float angleDeg) {
         return;
     }
 
-    float target = angleDeg + robot::ANGLE_OFFSET[leg][joint];  // 叠加零位偏移
-    target = constrain(target, 0.0f, 180.0f);                    // 限幅防堵转
-
-    int ch = robot::SERVO_PINS[leg][joint];   // PCA9685 输出通道（0~11）
-    pwm_.setPWM(ch, 0, angleToPulse(target));
+    const int ch = robot::SERVO_PINS[leg][joint];
+    const auto next = motion::command(leg, joint, angleDeg);
+    const float target = next.applied;
+    const int pulse = angleToPulse(target);
+    if (!known[ch] || pulse != angleToPulse(commands[ch].applied)) {
+        if (pwm_.setPWM(ch, 0, pulse) != 0) {
+            writeFailed = true;
+            return;
+        }
+    }
+    const bool first = !known[ch];
+    commands[ch] = next;
+    known[ch] = true;
 
     // 数字孪生遥测：实际到达角变化 ≥0.5° 才回传，且每通道 ≥50ms 一条（防刷屏）。
     // 角度不变或微小抖动时不回传，避免静止时也刷行。
     if (telemetryOn && ch >= 0 && ch < 12) {
         unsigned long now = millis();
-        if (fabsf(target - lastEchoDeg[ch]) >= 0.5f &&
-            (lastEchoMs[ch] == 0 || now - lastEchoMs[ch] >= 50)) {
+        if (first || (fabsf(target - lastEchoDeg[ch]) >= 0.5f && now - lastEchoMs[ch] >= 50)) {
             lastEchoDeg[ch] = target;
             lastEchoMs[ch] = now;
             Serial.printf("@SERVO:%d:%.1f\n", ch, target);

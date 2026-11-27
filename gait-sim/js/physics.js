@@ -31,7 +31,7 @@
       RAPIER = mod.default || mod;
       await RAPIER.init();
 
-      // 物理世界 (步长固定 1/60s: main.js 每渲染帧调一次 step(), 不按真实帧间隔缩放)
+      // main.js 采用累积时钟，以固定 1/60 秒步长推进物理。
       world = new RAPIER.World(GRAVITY);
 
       world.timestep = 1 / 60;
@@ -74,6 +74,7 @@
   function setPosition(x, y, z) {
     if (!robotBody) return;
     robotBody.setTranslation({ x: x, y: y, z: z }, true);
+    robotBody.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
     robotBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
     robotBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }

@@ -14,11 +14,13 @@
   <h1>六足机器人 · 数字孪生与步态模拟</h1>
   <p class="sub">径向 2 舵机腿 · 蜘蛛式折腿（大腿6.5 / 小腿12.5cm）· 无转向关节</p>
 
-  <!-- 面板/分区显隐由 main.js setAppMode() 统一切换(.hidden / style.display);
-       #twinPanel 由 twin-panel.js 运行时插到 #groundOnly 前, #rcSection 由 control-panel.js 插到 #notes 前 -->
+  <!-- 面板/分区显隐由 main.js setAppMode() 统一切换(.hidden / style.display); 三模式并列互斥:
+       悬空 hang(舵机孪生) | 触地 ground(步态模拟) | 真机遥控 rc(串口遥控面板)
+       #twinPanel / #rcSection 分别由 twin-panel.js / control-panel.js 运行时插到 #groundOnly 前 -->
   <div id="modeSwitch">
-    <button id="modeHangBtn" class="modeBtn modeBtnHang">🪝 悬空模式 · 舵机孪生 <span class="modeTag">有孪生</span></button>
-    <button id="modeGroundBtn" class="modeBtn modeBtnGround active">🐾 触地模式 · 步态模拟 <span class="modeTag">无孪生</span></button>
+    <button id="modeHangBtn" class="modeBtn modeBtnHang">🪝 悬空模式<span class="modeTag">舵机孪生</span></button>
+    <button id="modeGroundBtn" class="modeBtn modeBtnGround active">🐾 触地模式<span class="modeTag">步态模拟</span></button>
+    <button id="modeRcBtn" class="modeBtn modeBtnRc">🤖 真机遥控<span class="modeTag">串口 · 圆形摇杆</span></button>
   </div>
 
   <div id="groundOnly">
@@ -75,7 +77,7 @@
   <details id="notes" open>
     <summary>模式说明与要点（先读）</summary>
     <ul>
-      <li><b>两种模式</b>：<b>悬空</b>＝真机吊在架上，网页经 Web Serial <b>独占</b>串口发命令，并 1:1 镜像固件回传的 12 路 <code>@SERVO</code> 遥测（未收到遥测时显示双 90° 占位，非站姿；连接前先关串口监视器）；<b>触地</b>＝纯步态物理模拟 + 真机遥控。</li>
+      <li><b>悬空</b>查看串口命令帧和离线回放，<b>触地</b>运行地面仿真，<b>真机遥控</b>通过串口发送方向和停止命令。</li>
       <li><b>蜘蛛式折腿</b>（大腿 6.5 + 小腿 12.5cm）：髋在机身边缘下方，大腿向外上拱、小腿向下折回着地，膝盖是最高/最外点，侧看呈 "Λ" 拱。</li>
       <li><b>足端范围</b>：髋外 6.0cm（默认站立足，小腿竖直、脚在膝正下方）～12.8cm（伸出足 2/3 分点），默认机身高度 ≈11.0cm。</li>
       <li><b>支撑相前腿收（拉地）、后腿伸（蹬地）</b>，摆动相相反：行程系数 c<sub>i</sub>=cos(φ−α<sub>i</sub>)，c&gt;0 收 / c&lt;0 伸。</li>
@@ -84,7 +86,7 @@
       <li>对腿步态是唯一"干净平移"（无滑移、无偏航耦合），其余 4 腿悬停；角度与固件同构（余弦定理）：膝角 β=acos((L1²+L2²−d²)/(2L1L2))，髋角 α=atan2(−drop,a)+γ。</li>
       <!-- 与固件角度口径的换算（2026-09-10）：本页髋角 α（相对水平径向向外轴、向上为正）= 90° − 固件 ag2
            （固件 ag2 为"外倾为正"口径，默认站姿 +67.38° → α = +22.62°）；本页膝内角 β = 固件 ag1（站姿 +67.38°）。
-           固件舵机映射（实物实测）：大腿舵机角 S = ag2、小腿舵机角 K = 180 − ag1，ANGLE_OFFSET 整表已清零
+           固件舵机映射（实物实测）：大腿舵机角 S = ag2、小腿舵机角 K = 180 − ag1，最终角由逻辑角叠加逐路偏移并限幅
            → 默认站姿 S = 67.38°、K = 112.62°；悬空孪生直接按 α = 90° − S 摆姿态，与本页 IK 口径一致。
            下面 HUD 表头的「髋°/膝°」显示的就是仿真 α/β，不是固件的 ag2/ag1；换算说明与 gait-sim/README.md、robot.js 一致。 -->
     </ul>
@@ -101,8 +103,10 @@
 
 <script>
 /* 依次加载（本地优先，失败回退 CDN）：three → OrbitControls → robot → gaits → physics → main（暴露 SimCore）
-   最后是 control-panel / twin-panel 两个面板（各自轮询 SimCore 就绪后自举；control-panel 管触地真机遥控，
-   twin-panel 管悬空舵机孪生）。任一 js/ 脚本加载失败都会在 #bootError 里显示"启动失败" */
+   最后是 control-panel / twin-panel / master-panel 三个面板（各自轮询 SimCore 就绪后自举；control-panel 管真机遥控，
+   twin-panel 管悬空舵机孪生 + 串口，master-panel 是配套 MODE_MASTER_CONTROL 的主控台：方向/选腿/单舵机）。
+   三者都插在 #groundOnly 之前，由 main.js setAppMode() 按顶部三模式按钮互斥显隐。
+   任一 js/ 脚本加载失败都会在 #bootError 里显示"启动失败" */
 (function () {
   function load(url) {
     return new Promise(function (res, rej) {
@@ -117,12 +121,16 @@
   var chain = [
     ['lib/three.min.js', cdn + 'build/three.min.js'],
     ['lib/OrbitControls.js', cdn + 'examples/js/controls/OrbitControls.js'],
+    ['js/robot-model.js', null],
+    ['js/motion-frame.js', null],
     ['js/robot.js', null],
     ['js/gaits.js', null],
     ['js/physics.js', null],
     ['js/main.js', null],
     ['js/control-panel.js', null],
-    ['js/twin-panel.js', null]
+    ['js/replay-panel.js', null],
+    ['js/twin-panel.js', null],
+    ['js/master-panel.js', null]
   ];
   (function next(i) {
     if (i >= chain.length) return;

@@ -15,6 +15,7 @@
  *   -DMODE_SINGLE_LEG_TEST   可切换多腿测试（legs 运行时选 1~6 条腿）★新增
  *   -DMODE_SIX_LEGS_SYNC     六腿同步测试（单腿测试动作扩展为 6 腿同步）★新增
  *   -DMODE_GAIT_6DIR         六方向步态测试（SingleLegTest 全部功能 + 三角步态 + 6 个行走方向）★新增
+ *   -DMODE_MASTER_CONTROL    六足主控台（方向行走 + 选腿控制 + 单舵机控制，专门配合 gait-sim 网页）★新增
  *
  *  ★ PlatformIO 用法：见 platformio.ini，改 build_flags 里的 -DMODE_XXX 即可。
  *    舵机测试的串口命令：
@@ -336,6 +337,19 @@
     // 方向命令：f fl bl b br fr（0/60/120/180/240/300°）/ dir <角度> / dirs / mirror
     // 完整说明见 test/Gait6DirTest.cpp（自包含文件，此处直接引用）
     #include "../test/Gait6DirTest.cpp"
+
+#elif defined(MODE_MASTER_CONTROL)
+    // ---- 模式12：六足主控台（方向行走 + 选腿控制 + 单舵机控制）----
+    // 三块能力都在一个串口命令集里，专门给 gait-sim 网页（悬空孪生 → 固件模式选「主控台」）驱动：
+    //   A) 方向行走: f fl bl b br fr / dir <角度> / walk [n] / step / phase / mirror
+    //   B) 选腿控制: legs [all|none|<n...>|<a-b>] / cycle / one / each / home / goto <x> <y>
+    //   C) 单舵机  : sv <leg> <joint> <角度> / ch <通道> <角度> / lsv <leg> <a0> <a1> /
+    //                asv <joint> <角度> / center
+    //   另有 pos / map / state / verify / lift / dur / stop。
+    // 舵机指令通过 ServoManager::write() 下发。snapshot 开启版本化 @FRAME 遥测，
+    // @STATE 报告拍数、步态参数与遥控有效期。
+    // 完整说明见 test/MasterControl.cpp 文件头（自包含文件，此处直接引用）
+    #include "../test/MasterControl.cpp"
 
 #elif defined(MODE_SIX_LEGS_SYNC)
     // ---- 模式10：六腿同步测试（串口交互式）----

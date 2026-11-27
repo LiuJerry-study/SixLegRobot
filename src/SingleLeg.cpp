@@ -27,11 +27,8 @@ SingleLeg::SingleLeg(int id)
 // 内圆半径 r = |LENA-LENB| = 6；取负侧切线 kx = -r，使 IK 解出的小腿真正竖直：
 // 膝 = (kx, √(LENA²−r²)) = (−6, 2.5)，脚 = 膝正下方一个小腿长 → (−6, −10)。
 void SingleLeg::defaultStandingFoot(double& x, double& y) {
-    const double r  = fabs(robot::LENA - robot::LENB);
-    const double kx = -r;
-    const double ky = sqrt(robot::LENA * robot::LENA - r * r);
-    x = kx;
-    y = ky - robot::LENB;
+    x = robot::STAND_X;
+    y = robot::STAND_Y;
 }
 
 // 伸出足端：默认站立高度上，站立脚与达外圆同侧交点所成线段的 2/3 分点
@@ -51,12 +48,12 @@ void SingleLeg::extendedFoot(double& x, double& y) {
 void SingleLeg::init(float standH) {
     ServoManager::begin();                          // 幂等
 
-    standHeight = standH;                           // 仅记录，当前实现未参与运算
-
-    double sx, sy;
-    defaultStandingFoot(sx, sy);
-    currentX = (float)sx;
-    currentY = (float)sy;
+    const FootPos requested{robot::STAND_X, -standH};
+    double peak = 0;
+    const motion::Path standing{requested, requested, 0, 1, false, false};
+    standHeight = motion::feasible(legId, standing, 0, peak) ? standH : -robot::STAND_Y;
+    currentX = robot::STAND_X;
+    currentY = -standHeight;
 
     LegAngles ang = kin.ik(currentX, currentY);
     writeServosFromRad(ang.thigh, ang.knee);
@@ -105,6 +102,11 @@ void SingleLeg::startPrimitive(LegPrimitive prim, unsigned long dur) {
     if (extend) extendedFoot(tx, ty);        // 张 → 伸出脚
     else        defaultStandingFoot(tx, ty); // 收 → 站立脚
 
+    ty = -standHeight;
+    if (extend) {
+        const double range = robot::LENA + robot::LENB;
+        tx = robot::STAND_X + (2.0 / 3.0) * (-sqrt(range * range - ty * ty) - robot::STAND_X);
+    }
     float lift = arc ? arcLift : 0.0f;
     TrajectoryMode mode = arc ? MODE_SWING : MODE_STANCE;
 
@@ -117,7 +119,7 @@ void SingleLeg::update() {
 
     // 1. 时间进度 (0~1)
     unsigned long now = millis();
-    float progress = (now - startTime) / (float)duration;
+    float progress = duration ? (now - startTime) / (float)duration : 1.0f;
     if (progress > 1.0) progress = 1.0;
 
     // 2. ease-in-out 平滑，起步 / 停止更柔和
